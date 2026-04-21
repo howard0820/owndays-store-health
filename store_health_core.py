@@ -8,8 +8,10 @@ Shared by both interactive and automated scripts.
 
 import pandas as pd
 import numpy as np
-import os, re, warnings
+import os, re, warnings, io
 from datetime import datetime
+from urllib import request as urllib_request
+from urllib.error import URLError
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
 from openpyxl.utils import get_column_letter
@@ -142,6 +144,77 @@ def is_retail_store(name) -> bool:
 def is_warehouse(name) -> bool:
     name = str(name) if name else ''
     return any(p in name for p in WAREHOUSE_PATTERNS)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LIVE STORE LIST (Google Sheets)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+STORE_LIST_URL = (
+    "https://docs.google.com/spreadsheets/d/"
+    "1A6Oe3Ie8-HqJ_1-vy8ePAeFFbcNEJ9zPQMCx6BK_o5w"
+    "/export?format=csv&gid=173795654"
+)
+
+def fetch_live_store_list(timeout=15):
+    """Fetch active store list from Google Sheets.
+    Returns set of store names, or None if fetch fails.
+    Sheet columns: A=店鋪No., B=店名, C=分區
+    """
+    try:
+        req = urllib_request.Request(STORE_LIST_URL, headers={'User-Agent': 'Mozilla/5.0'})
+        resp = urllib_request.urlopen(req, timeout=timeout)
+        csv_data = resp.read().decode('utf-8')
+        df = pd.read_csv(io.StringIO(csv_data), header=1)  # header at row 2 (0-indexed row 1)
+
+        # Find the store name column (店名)
+        name_col = None
+        for c in df.columns:
+            if '店名' in str(c):
+                name_col = c
+                break
+        if name_col is None:
+            # Fallback: second column
+            name_col = df.columns[1] if len(df.columns) > 1 else df.columns[0]
+
+        stores = set()
+        for val in df[name_col].dropna():
+            s = str(val).strip()
+            if s and s != 'nan':
+                stores.add(s)
+
+        print(f"    -> Live store list: {len(stores)} active stores")
+        return stores
+    except (URLError, Exception) as e:
+        print(f"    -> WARN: Could not fetch live store list ({e})")
+        print(f"    -> Continuing with all stores from data")
+        return None
+
+
+def filter_by_live_list(retail_stores, live_stores):
+    """Filter retail stores to only those in the live list.
+    Uses fuzzy matching: live list name must be contained in data store name or vice versa.
+    """
+    if not live_stores:
+        return retail_stores
+
+    matched = []
+    removed = []
+    for store in retail_stores:
+        # Exact match or substring match (data name may have extra chars)
+        if store in live_stores:
+            matched.append(store)
+        elif any(ls in store or store in ls for ls in live_stores):
+            matched.append(store)
+        else:
+            removed.append(store)
+
+    if removed:
+        print(f"    -> Excluded {len(removed)} closed/unlisted stores:")
+        for s in sorted(removed):
+            print(f"       - {s}")
+
+    return matched
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -536,7 +609,7 @@ def brand_display_analysis(df, sales_days):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def run_analysis(frame_file, cl_file, sales_days, cl_sales_days=60,
-                 store_filter=None, top_n_stores=None):
+                 store_filter=None, top_n_stores=None, base_date=None):
     """
     Run full store health analysis.
 
@@ -591,6 +664,12 @@ def run_analysis(frame_file, cl_file, sales_days, cl_sales_days=60,
     wh_stores = [s for s in df_all['store_name'].unique() if is_warehouse(s)]
     print(f"\n[3] Stores: {len(retail_stores)} retail, {len(wh_stores)} warehouse")
 
+    # Cross-check with live store list from Google Sheets
+    print(f"\n    Fetching live store list from Google Sheets...")
+    live_stores = fetch_live_store_list()
+    if live_stores:
+        retail_stores = filter_by_live_list(retail_stores, live_stores)
+
     if store_filter:
         retail_stores = [s for s in retail_stores
                          if any(f in s for f in store_filter)]
@@ -642,6 +721,7 @@ def run_analysis(frame_file, cl_file, sales_days, cl_sales_days=60,
         'dead_stock_count': df_frames['is_dead_stock'].sum() if 'is_dead_stock' in df_frames.columns else 0,
         'sales_days': sales_days,
         'cl_sales_days': cl_sales_days,
+        'base_date': str(base_date) if base_date else '',
     }
 
     print(f"\n  Summary:")
@@ -718,6 +798,22 @@ def generate_report(results, output_path):
     summary = results['summary']
     sales_days = summary['sales_days']
     cl_sales_days = summary['cl_sales_days']
+    base_date_str = summary.get('base_date', '')
+    # Compute date labels for headers
+    if base_date_str:
+        from datetime import timedelta
+        bd = datetime.strptime(base_date_str, '%Y-%m-%d').date()
+        frame_start = bd - timedelta(days=sales_days - 1)
+        cl_start = bd - timedelta(days=cl_sales_days - 1)
+        sales_label = f'全台銷量\n({frame_start}~{bd})'
+        inv_label = f'全台庫存\n({bd})'
+        cl_sales_label = f'全台銷量\n({cl_start}~{bd})'
+        cl_inv_label = f'全台庫存\n({bd})'
+    else:
+        sales_label = f'全台銷量({sales_days}d)'
+        inv_label = '全台庫存'
+        cl_sales_label = f'全台銷量({cl_sales_days}d)'
+        cl_inv_label = '全台庫存'
 
     # ── Sheet 1: 總覽 Summary ─────────────────────────────────────────────
     ws = wb.active
@@ -821,8 +917,11 @@ def generate_report(results, output_path):
         store_order = [s for s, _, _ in store_pct_list]
         brand_pivot = brand_pivot.reindex(store_order).fillna(0).astype(int)
 
-        # Headers
-        brand_headers = ['No.', '門市'] + brand_order
+        # Add Total per store
+        brand_pivot['Total'] = brand_pivot[brand_order].sum(axis=1)
+
+        # Headers: No., 門市, Total, Brand1, Brand2, ...
+        brand_headers = ['No.', '門市', 'Total'] + brand_order
         for ci, h in enumerate(brand_headers, 1):
             ws.cell(row=start_row, column=ci, value=h)
         _style_header(ws, start_row, len(brand_headers),
@@ -832,15 +931,18 @@ def generate_report(results, output_path):
         # Data rows
         for idx, store in enumerate(store_order, 1):
             if store in brand_pivot.index:
-                row_vals = brand_pivot.loc[store].tolist()
+                total_val = int(brand_pivot.loc[store, 'Total'])
+                row_vals = brand_pivot.loc[store, brand_order].tolist()
             else:
+                total_val = 0
                 row_vals = [0] * len(brand_order)
-            data = [idx, store] + row_vals
-            # Highlight cells with 0 displayable SKUs (for brands this store carries)
+            data = [idx, store, total_val] + row_vals
             _write_row(ws, start_row, data)
-            # Color code: 0 = red text for non-zero brand presence
+            # Bold the Total column
+            ws.cell(row=start_row, column=3).font = BLACK_BOLD
+            # Color code brand columns (starting at column 4)
             for bi, val in enumerate(row_vals):
-                cell = ws.cell(row=start_row, column=bi + 3)
+                cell = ws.cell(row=start_row, column=bi + 4)
                 if val == 0:
                     cell.font = Font(name='Arial', color='CC0000')
                 elif val <= 2:
@@ -850,10 +952,12 @@ def generate_report(results, output_path):
             start_row += 1
 
         # Total row
-        total_data = ['—', '全國合計'] + [int(brand_pivot[b].sum()) for b in brand_order]
+        grand_total = int(brand_pivot['Total'].sum())
+        total_data = ['—', '全國合計', grand_total] + [int(brand_pivot[b].sum()) for b in brand_order]
         _write_row(ws, start_row, total_data,
                    fill=PatternFill('solid', fgColor='E8F0FE'))
         ws.cell(row=start_row, column=2).font = BLACK_BOLD
+        ws.cell(row=start_row, column=3).font = BLACK_BOLD
         start_row += 1
 
     _auto_width(ws)
@@ -918,7 +1022,7 @@ def generate_report(results, output_path):
     current_row += 1
 
     nat_frame_headers = ['全台排名', '品番', 'カラー', 'PLU', 'ブランド',
-                         '全台銷量', '全台庫存', 'DOH(月)',
+                         sales_label, inv_label, 'DOH(月)',
                          '缺貨店數', '庫存緊張店數', '鋪貨店數']
     for ci, h in enumerate(nat_frame_headers, 1):
         ws_nat.cell(row=current_row, column=ci, value=h)
@@ -971,7 +1075,7 @@ def generate_report(results, output_path):
         ws_nat.cell(row=current_row, column=1, value='🟡 全國隱形眼鏡 SKU 清單').font = Font(name='Arial', bold=True, size=12, color='E67C00')
         current_row += 1
 
-        nat_cl_headers = ['排名', '品番', '度數', 'PLU', '全台銷量(60d)', '全台庫存',
+        nat_cl_headers = ['排名', '品番', '度數', 'PLU', cl_sales_label, cl_inv_label,
                           'DOH(月)', '缺貨店數', '庫存緊張店數', '鋪貨店數']
         for ci, h in enumerate(nat_cl_headers, 1):
             ws_nat.cell(row=current_row, column=ci, value=h)

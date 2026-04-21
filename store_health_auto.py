@@ -381,6 +381,7 @@ def main():
         cl_sales_days=cl_sales_days,
         store_filter=store_filter,
         top_n_stores=top_n_stores,
+        base_date=base_date,
     )
 
     if results is None:

@@ -6,7 +6,7 @@ Designed for publishing to GitHub Pages.
 import os, json
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 def generate_html_report(results, output_path):
@@ -20,8 +20,19 @@ def generate_html_report(results, output_path):
     summary = results['summary']
     sales_days = summary['sales_days']
     cl_sales_days = summary['cl_sales_days']
+    base_date_str = summary.get('base_date', '')
     n_stores = len(retail_stores)
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
+
+    # Date labels
+    if base_date_str:
+        bd = datetime.strptime(base_date_str, '%Y-%m-%d').date()
+        frame_start = bd - timedelta(days=sales_days - 1)
+        sales_date_label = f'{frame_start}~{bd}'
+        inv_date_label = str(bd)
+    else:
+        sales_date_label = f'{sales_days}d'
+        inv_date_label = ''
 
     # ── Prepare data for HTML ──────────────────────────────────────────
 
@@ -63,8 +74,12 @@ def generate_html_report(results, output_path):
 
         for store in [s['store'] for s in store_shortage]:
             row = {'store': store}
+            row_total = 0
             for b in brand_list:
-                row[b] = int(pivot.loc[store, b]) if store in pivot.index else 0
+                v = int(pivot.loc[store, b]) if store in pivot.index else 0
+                row[b] = v
+                row_total += v
+            row['_total'] = row_total
             brand_matrix.append(row)
 
     # 3. National top SKU list (top 300)
@@ -95,6 +110,75 @@ def generate_html_report(results, output_path):
             'low': int(r['low_stores']),
             'stores': int(r['n_stores']),
         })
+
+    # 4. Per-store data
+    store_data = {}
+    for store in sorted(retail_stores):
+        sf = df_frames[df_frames['store_name'] == store].copy()
+        sc = df_contact[df_contact['store_name'] == store].copy() if not df_contact.empty else pd.DataFrame()
+
+        # Top N summary
+        sf_by_rank = sf.sort_values('national_rank', ascending=True)
+        tiers = {}
+        for top_n in [50, 100, 200, 300]:
+            tier = sf_by_rank.head(top_n)
+            n = len(tier)
+            if n == 0:
+                tiers[top_n] = {'n': 0, 'oos': 0, 'low': 0, 'pct': None}
+            else:
+                oos = int(tier['is_stockout'].sum())
+                low = int(tier['is_low_stock'].sum())
+                tiers[top_n] = {'n': n, 'oos': oos, 'low': low, 'pct': round((oos+low)/n*100, 1)}
+
+        # Frame SKU list (top 200 by store sales)
+        sf_sorted = sf.sort_values('sales', ascending=False).head(200)
+        frames = []
+        for _, r in sf_sorted.iterrows():
+            doh = round(r['doh_months'], 1) if r['doh_months'] < 9999 else '∞'
+            if r['is_stockout']:
+                status = '缺貨'
+            elif r['is_low_stock']:
+                status = '庫存緊張'
+            else:
+                status = '貨量OK'
+            frames.append({
+                'hinban': r['品番'], 'plu': r['PLU'],
+                'brand': r.get('ブランド', ''),
+                'sales': int(r['sales']), 'inv': int(r['inventory']),
+                'doh': doh, 'nat_rank': int(r['national_rank']),
+                'store_rank': int(r['store_rank']), 'status': status,
+                'replenish': int(r['replenish_qty']) if r['needs_replenish'] else 0,
+            })
+
+        # CL list
+        cls_list = []
+        if not sc.empty:
+            sc_sorted = sc.sort_values('sales', ascending=False).head(100)
+            for _, r in sc_sorted.iterrows():
+                doh = round(r['doh_months'], 1) if r['doh_months'] < 9999 else '∞'
+                status = '缺貨' if r['is_stockout'] else ('庫存緊張' if r['is_low_stock'] else '貨量OK')
+                cls_list.append({
+                    'hinban': r['品番'], 'degree': r.get('degree', ''),
+                    'plu': r['PLU'], 'sales': int(r['sales']),
+                    'inv': int(r['inventory']), 'doh': doh, 'status': status,
+                })
+
+        # Brand display data
+        brands = []
+        if not brand_df.empty:
+            sb = brand_df[brand_df['store_name'] == store].sort_values('total_sales', ascending=False)
+            for _, r in sb.iterrows():
+                doh = round(r['doh_months'], 1) if r['doh_months'] < 9999 else '∞'
+                brands.append({
+                    'brand': r['ブランド'],
+                    'sku': int(r['sku_count']),
+                    'display': int(r['displayable_sku_count']),
+                    'inv': int(r['total_inv']),
+                    'doh': doh,
+                    'pct': round(r['sales_pct'] * 100, 1),
+                })
+
+        store_data[store] = {'tiers': tiers, 'frames': frames, 'cls': cls_list, 'brands': brands}
 
     # ── Build HTML ─────────────────────────────────────────────────────
     html = f"""<!DOCTYPE html>
@@ -177,6 +261,7 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
   <button class="active" onclick="showTab('tab-shortage')">各門市庫存不足%</button>
   <button onclick="showTab('tab-brand')">Brand 可展示SKU</button>
   <button onclick="showTab('tab-national')">全國 Top SKU</button>
+  <button onclick="showTab('tab-stores')" style="background:#FF6D01;color:#fff;border-color:#FF6D01">📦 各門市明細</button>
 </div>
 
 <!-- Tab 1: Shortage -->
@@ -220,7 +305,7 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
   </div>
   <div class="scroll-wrapper">
   <table id="brand-table">
-  <thead><tr><th>No.</th><th>門市</th>"""
+  <thead><tr><th>No.</th><th>門市</th><th class="green">Total</th>"""
 
     for b in brand_list:
         html += f'<th class="green">{b}</th>'
@@ -228,6 +313,7 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
 
     for i, row in enumerate(brand_matrix, 1):
         html += f'<tr><td>{i}</td><td class="sticky-col">{row["store"]}</td>'
+        html += f'<td><b>{row.get("_total", 0)}</b></td>'
         for b in brand_list:
             v = row.get(b, 0)
             cls = 'val-zero' if v == 0 else ('val-low' if v <= 2 else 'val-ok')
@@ -235,7 +321,8 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
         html += '</tr>\n'
 
     # Total row
-    html += '<tr class="nat-row"><td>—</td><td class="sticky-col">全國合計</td>'
+    grand_total = sum(row.get('_total', 0) for row in brand_matrix)
+    html += f'<tr class="nat-row"><td>—</td><td class="sticky-col">全國合計</td><td><b>{grand_total}</b></td>'
     for b in brand_list:
         total = sum(row.get(b, 0) for row in brand_matrix)
         html += f'<td>{total}</td>'
@@ -258,7 +345,7 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
   <div class="scroll-wrapper" style="max-height:700px;">
   <table id="national-table">
   <thead><tr>
-    <th>排名</th><th>品番</th><th>品牌</th><th>全台銷量</th><th>全台庫存</th>
+    <th>排名</th><th>品番</th><th>品牌</th><th>全台銷量<br>(""" + sales_date_label + """)</th><th>全台庫存<br>(""" + inv_date_label + """)</th>
     <th>DOH(月)</th><th>缺貨店數</th><th>緊張店數</th><th>鋪貨店數</th>
   </tr></thead>
   <tbody>"""
@@ -273,9 +360,38 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
 
     html += """</tbody></table></div></div></div>
 
+<!-- Tab 4: Per-store detail -->
+<div id="tab-stores" class="tab-content">
+<div class="section">
+  <h2 style="border-color:#FF6D01;color:#FF6D01">📦 各門市明細</h2>
+  <div class="filter-bar">
+    <select id="store-select" onchange="showStore(this.value)" style="width:300px;font-size:1em;padding:8px;">
+      <option value="">-- 選擇門市 --</option>"""
+
+    # Store options sorted by Top50 shortage (worst first)
+    for s in store_shortage:
+        pct_label = f" ({s['top50']:.0f}%)" if s.get('top50') is not None else ''
+        html += f'\n      <option value="{s["store"]}">{s["store"]}{pct_label}</option>'
+
+    html += """
+    </select>
+  </div>
+  <div id="store-detail-area" style="margin-top:16px;"></div>
+</div>
+</div>
+
 </div><!-- container -->
 
 <script>
+const storeData = """
+
+    # Serialize store data as JSON
+    import json
+    # Convert to JSON-safe format
+    html += json.dumps(store_data, ensure_ascii=False)
+
+    html += """;
+
 function showTab(id) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
@@ -306,6 +422,88 @@ function filterNatStatus(val) {
     const low = parseInt(row.dataset.low || '0');
     if (val === 'oos') row.style.display = oos > 0 ? '' : 'none';
     else if (val === 'low') row.style.display = low > 0 ? '' : 'none';
+  });
+}
+
+function pctClass(v) { return v > 60 ? 'pct-high' : (v > 40 ? 'pct-mid' : 'pct-low'); }
+function statusClass(s) { return s === '缺貨' ? 'pct-high' : (s === '庫存緊張' ? 'pct-mid' : ''); }
+
+function showStore(name) {
+  const area = document.getElementById('store-detail-area');
+  if (!name || !storeData[name]) { area.innerHTML = ''; return; }
+  const d = storeData[name];
+  let h = '';
+
+  // Summary
+  h += '<h3 style="color:#FF6D01;margin-bottom:8px;">📊 ' + name + ' 庫存健康摘要</h3>';
+  h += '<table style="width:auto;margin-bottom:20px"><thead><tr><th>排名區間</th><th>SKU數</th><th>缺貨數</th><th>庫存緊張數</th><th>庫存不足%</th></tr></thead><tbody>';
+  [50,100,200,300].forEach(n => {
+    const t = d.tiers[n];
+    if (!t || t.n === 0) return;
+    const cls = pctClass(t.pct);
+    h += '<tr><td>Top ' + n + (t.n < n ? ' (實際'+t.n+')' : '') + '</td><td>' + t.n + '</td><td>' + t.oos + '</td><td>' + t.low + '</td><td class="' + cls + '">' + t.pct.toFixed(1) + '%</td></tr>';
+  });
+  h += '</tbody></table>';
+
+  // Frame list
+  h += '<h3 style="color:#1a73e8;margin-bottom:8px;">📦 鏡框 / 太陽眼鏡 SKU清單</h3>';
+  h += '<div class="filter-bar"><input type="text" placeholder="搜尋品番/品牌..." oninput="filterStoreTable(this.value)"></div>';
+  h += '<div class="scroll-wrapper" style="max-height:500px"><table id="store-frame-table"><thead><tr>';
+  h += '<th>品番</th><th>PLU</th><th>品牌</th><th>銷量</th><th>在庫</th><th>DOH(月)</th><th>全台排名</th><th>店內排名</th><th>狀態</th><th>建議補貨</th>';
+  h += '</tr></thead><tbody>';
+  d.frames.forEach(f => {
+    const sc = statusClass(f.status);
+    const fill = f.status === '缺貨' ? 'style="background:#fce8e6"' : (f.status === '庫存緊張' ? 'style="background:#fef7e0"' : '');
+    h += '<tr ' + fill + '><td style="text-align:left">' + f.hinban + '</td><td>' + f.plu + '</td><td>' + f.brand + '</td>';
+    h += '<td>' + f.sales + '</td><td>' + f.inv + '</td><td>' + f.doh + '</td>';
+    h += '<td>' + f.nat_rank + '</td><td>' + f.store_rank + '</td>';
+    h += '<td class="' + sc + '">' + f.status + '</td>';
+    h += '<td>' + (f.replenish > 0 ? f.replenish : '') + '</td></tr>';
+  });
+  h += '</tbody></table></div>';
+
+  // CL list
+  if (d.cls && d.cls.length > 0) {
+    h += '<h3 style="color:#e67c00;margin:20px 0 8px;">🟡 隱形眼鏡 SKU清單</h3>';
+    h += '<div class="scroll-wrapper" style="max-height:400px"><table><thead><tr>';
+    h += '<th>品番</th><th>度數</th><th>PLU</th><th>銷量</th><th>在庫</th><th>DOH(月)</th><th>狀態</th>';
+    h += '</tr></thead><tbody>';
+    d.cls.forEach(c => {
+      const sc = statusClass(c.status);
+      const fill = c.status === '缺貨' ? 'style="background:#fce8e6"' : (c.status === '庫存緊張' ? 'style="background:#fef7e0"' : '');
+      h += '<tr ' + fill + '><td style="text-align:left">' + c.hinban + '</td><td>' + c.degree + '</td><td>' + c.plu + '</td>';
+      h += '<td>' + c.sales + '</td><td>' + c.inv + '</td><td>' + c.doh + '</td>';
+      h += '<td class="' + sc + '">' + c.status + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+
+  // Brand display analysis
+  if (d.brands && d.brands.length > 0) {
+    h += '<h3 style="color:#0b8043;margin:20px 0 8px;">🟢 Brand 可展示分析</h3>';
+    h += '<div class="scroll-wrapper"><table><thead><tr>';
+    h += '<th class="green">品牌</th><th class="green">佔銷量%</th><th class="green">SKU數</th><th class="green">可展示SKU(≥2)</th><th class="green">總庫存</th><th class="green">DOH(月)</th>';
+    h += '</tr></thead><tbody>';
+    d.brands.forEach(b => {
+      const dcls = b.display === 0 ? 'val-zero' : (b.display <= 2 ? 'val-low' : 'val-ok');
+      h += '<tr><td style="text-align:left;font-weight:600">' + b.brand + '</td>';
+      h += '<td>' + b.pct.toFixed(1) + '%</td><td>' + b.sku + '</td>';
+      h += '<td class="' + dcls + '">' + b.display + '</td>';
+      h += '<td>' + b.inv + '</td><td>' + b.doh + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+
+  area.innerHTML = h;
+}
+
+function filterStoreTable(q) {
+  const rows = document.querySelectorAll('#store-frame-table tbody tr');
+  q = q.toLowerCase();
+  rows.forEach(r => {
+    const c0 = r.cells[0] ? r.cells[0].textContent.toLowerCase() : '';
+    const c2 = r.cells[2] ? r.cells[2].textContent.toLowerCase() : '';
+    r.style.display = (c0.includes(q) || c2.includes(q)) ? '' : 'none';
   });
 }
 </script>
