@@ -1,0 +1,1856 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OWNDAYS TW Store Health Dashboard</title>
+<style>
+:root {
+    --blue: #1a73e8; --green: #0b8043; --red: #cc0000;
+    --orange: #e67c00; --gray: #f8f9fa; --border: #dee2e6;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; color: #333; }
+.container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+header { background: linear-gradient(135deg, #1a73e8, #0b8043); color: #fff;
+         padding: 24px 32px; border-radius: 12px; margin-bottom: 24px; }
+header h1 { font-size: 1.6em; margin-bottom: 4px; }
+header .meta { opacity: 0.85; font-size: 0.9em; }
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+           gap: 16px; margin-bottom: 24px; }
+.kpi { background: #fff; border-radius: 10px; padding: 18px; text-align: center;
+       box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+.kpi .value { font-size: 2em; font-weight: 700; color: var(--blue); }
+.kpi .label { font-size: 0.85em; color: #666; margin-top: 4px; }
+.section { background: #fff; border-radius: 10px; padding: 24px;
+           box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 24px; }
+.section h2 { font-size: 1.2em; color: var(--blue); margin-bottom: 16px;
+              border-bottom: 2px solid var(--blue); padding-bottom: 8px; }
+.section h2.green { color: var(--green); border-color: var(--green); }
+table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+th { background: var(--blue); color: #fff; padding: 8px 6px; text-align: center;
+     position: sticky; top: 0; z-index: 2; }
+th.green { background: var(--green); }
+td { padding: 6px; text-align: center; border-bottom: 1px solid var(--border); }
+tr:hover { background: #f0f7ff; }
+.pct-high { background: #fce8e6; color: var(--red); font-weight: 700; }
+.pct-mid { background: #fef7e0; color: var(--orange); font-weight: 600; }
+.pct-low { background: #e6f4ea; color: var(--green); }
+.val-zero { color: var(--red); font-weight: 700; }
+.val-low { color: var(--orange); }
+.val-ok { color: var(--green); }
+.sticky-col { position: sticky; left: 0; background: #fff; z-index: 1;
+              text-align: left !important; font-weight: 600; }
+tr:hover .sticky-col { background: #f0f7ff; }
+.nat-row { background: #e8f0fe !important; font-weight: 700; }
+.nat-row .sticky-col { background: #e8f0fe !important; }
+.scroll-wrapper { overflow-x: auto; max-height: 600px; overflow-y: auto; }
+.filter-bar { margin-bottom: 12px; display: flex; gap: 12px; align-items: center; }
+.filter-bar input { padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
+                    font-size: 0.9em; width: 220px; }
+.filter-bar select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
+.tab-bar { display: flex; gap: 4px; margin-bottom: 16px; flex-wrap: wrap; }
+.tab-bar button { padding: 8px 16px; border: 1px solid var(--border); background: #fff;
+                  border-radius: 6px 6px 0 0; cursor: pointer; font-size: 0.9em; }
+.tab-bar button.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>OWNDAYS Taiwan ─ Store Health Dashboard</h1>
+  <div class="meta">更新時間: 2026-04-21 09:57 ｜ 鏡框銷售期間: 30天 ｜ CL銷售期間: 60天 ｜ 門市數: 94</div>
+</header>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="value">94</div><div class="label">分析門市數</div></div>
+  <div class="kpi"><div class="value">5655</div><div class="label">鏡框 SKU 數</div></div>
+  <div class="kpi"><div class="value">56.3%</div><div class="label">鏡框缺貨率 (qty≤1)</div></div>
+  <div class="kpi"><div class="value">0.7%</div><div class="label">庫存緊張率 (DOH&lt;1.5月)</div></div>
+  <div class="kpi"><div class="value">4999</div><div class="label">無用庫存筆數</div></div>
+  <div class="kpi"><div class="value">218</div><div class="label">CL SKU 數</div></div>
+</div>
+
+<div class="tab-bar">
+  <button class="active" onclick="showTab('tab-shortage')">各門市庫存不足%</button>
+  <button onclick="showTab('tab-brand')">Brand 可展示SKU</button>
+  <button onclick="showTab('tab-national')">全國 Top SKU</button>
+</div>
+
+<!-- Tab 1: Shortage -->
+<div id="tab-shortage" class="tab-content active">
+<div class="section">
+  <h2>各門市庫存不足% (缺貨 + 庫存緊張)</h2>
+  <div class="filter-bar">
+    <input type="text" id="filter-store" placeholder="搜尋門市..." oninput="filterTable('shortage-table', 1, this.value)">
+  </div>
+  <div class="scroll-wrapper">
+  <table id="shortage-table">
+  <thead><tr><th>No.</th><th>門市</th><th>Top 50</th><th>Top 100</th><th>Top 200</th><th>Top 300</th></tr></thead>
+  <tbody>
+  <tr class="nat-row"><td>—</td><td class="sticky-col">全國</td><td class="pct-high">88.0%</td><td class="pct-high">75.0%</td><td class="pct-high">68.5%</td><td class="pct-high">60.3%</td></tr>
+<tr><td>1</td><td class="sticky-col">三重重新家楽福</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td></tr>
+<tr><td>2</td><td class="sticky-col">勤美誠品</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td></tr>
+<tr><td>3</td><td class="sticky-col">南崁佳瑪</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td></tr>
+<tr><td>4</td><td class="sticky-col">台中廣三SOGO</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td></tr>
+<tr><td>5</td><td class="sticky-col">台南FOCUS</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td></tr>
+<tr><td>6</td><td class="sticky-col">嘉義NICE</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td></tr>
+<tr><td>7</td><td class="sticky-col">大統五福</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td></tr>
+<tr><td>8</td><td class="sticky-col">宜蘭金東購物商場</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td></tr>
+<tr><td>9</td><td class="sticky-col">微風 松高</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td></tr>
+<tr><td>10</td><td class="sticky-col">新竹站前SOGO</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td></tr>
+<tr><td>11</td><td class="sticky-col">淡水大都會廣場</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td></tr>
+<tr><td>12</td><td class="sticky-col">環球南港</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td></tr>
+<tr><td>13</td><td class="sticky-col">秀泰岡山</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td><td class="pct-high">100.0%</td></tr>
+<tr><td>14</td><td class="sticky-col">新莊宏匯</td><td class="pct-high">82.0%</td><td class="pct-high">74.0%</td><td class="pct-high">70.0%</td><td class="pct-high">69.3%</td></tr>
+<tr><td>15</td><td class="sticky-col">漢神巨蛋</td><td class="pct-high">76.0%</td><td class="pct-high">65.0%</td><td class="pct-high">66.0%</td><td class="pct-high">65.7%</td></tr>
+<tr><td>16</td><td class="sticky-col">石牌</td><td class="pct-high">66.0%</td><td class="pct-high">61.0%</td><td class="pct-high">62.5%</td><td class="pct-mid">59.3%</td></tr>
+<tr><td>17</td><td class="sticky-col">MITSUI OUTLET PARK 台南</td><td class="pct-high">64.0%</td><td class="pct-mid">57.0%</td><td class="pct-mid">54.0%</td><td class="pct-mid">51.3%</td></tr>
+<tr><td>18</td><td class="sticky-col">南紡購物中心</td><td class="pct-high">64.0%</td><td class="pct-mid">56.0%</td><td class="pct-mid">57.5%</td><td class="pct-mid">55.0%</td></tr>
+<tr><td>19</td><td class="sticky-col">八德置地生活</td><td class="pct-high">62.0%</td><td class="pct-high">61.0%</td><td class="pct-high">61.0%</td><td class="pct-mid">58.3%</td></tr>
+<tr><td>20</td><td class="sticky-col">公館</td><td class="pct-high">62.0%</td><td class="pct-mid">60.0%</td><td class="pct-high">63.0%</td><td class="pct-high">64.7%</td></tr>
+<tr><td>21</td><td class="sticky-col">高雄夢時代</td><td class="pct-high">62.0%</td><td class="pct-mid">56.0%</td><td class="pct-mid">53.5%</td><td class="pct-mid">50.7%</td></tr>
+<tr><td>22</td><td class="sticky-col">新竹巨城</td><td class="pct-mid">60.0%</td><td class="pct-mid">57.0%</td><td class="pct-mid">59.5%</td><td class="pct-high">61.0%</td></tr>
+<tr><td>23</td><td class="sticky-col">高雄大遠百</td><td class="pct-mid">60.0%</td><td class="pct-mid">53.0%</td><td class="pct-mid">51.5%</td><td class="pct-mid">51.0%</td></tr>
+<tr><td>24</td><td class="sticky-col">高雄義享</td><td class="pct-mid">60.0%</td><td class="pct-mid">53.0%</td><td class="pct-mid">54.5%</td><td class="pct-mid">52.3%</td></tr>
+<tr><td>25</td><td class="sticky-col">三重佳瑪</td><td class="pct-mid">58.0%</td><td class="pct-high">64.0%</td><td class="pct-high">61.5%</td><td class="pct-high">61.0%</td></tr>
+<tr><td>26</td><td class="sticky-col">江子翠</td><td class="pct-mid">58.0%</td><td class="pct-mid">52.0%</td><td class="pct-mid">53.0%</td><td class="pct-mid">51.3%</td></tr>
+<tr><td>27</td><td class="sticky-col">微風南京</td><td class="pct-mid">54.0%</td><td class="pct-mid">58.0%</td><td class="pct-high">62.5%</td><td class="pct-high">64.0%</td></tr>
+<tr><td>28</td><td class="sticky-col">板橋府中</td><td class="pct-mid">54.0%</td><td class="pct-mid">56.0%</td><td class="pct-high">61.5%</td><td class="pct-high">60.3%</td></tr>
+<tr><td>29</td><td class="sticky-col">高雄成功家樂福</td><td class="pct-mid">54.0%</td><td class="pct-mid">48.0%</td><td class="pct-mid">49.0%</td><td class="pct-mid">47.3%</td></tr>
+<tr><td>30</td><td class="sticky-col">南西</td><td class="pct-mid">52.0%</td><td class="pct-mid">55.0%</td><td class="pct-mid">57.5%</td><td class="pct-high">61.3%</td></tr>
+<tr><td>31</td><td class="sticky-col">員林大全聯</td><td class="pct-mid">52.0%</td><td class="pct-mid">45.0%</td><td class="pct-mid">52.0%</td><td class="pct-mid">53.3%</td></tr>
+<tr><td>32</td><td class="sticky-col">新光三越高雄左營</td><td class="pct-mid">52.0%</td><td class="pct-mid">46.0%</td><td class="pct-mid">47.5%</td><td class="pct-mid">45.0%</td></tr>
+<tr><td>33</td><td class="sticky-col">環球板橋</td><td class="pct-mid">52.0%</td><td class="pct-mid">47.0%</td><td class="pct-mid">54.5%</td><td class="pct-mid">55.7%</td></tr>
+<tr><td>34</td><td class="sticky-col">台茂購物中心</td><td class="pct-mid">50.0%</td><td class="pct-mid">43.0%</td><td class="pct-mid">47.5%</td><td class="pct-mid">49.0%</td></tr>
+<tr><td>35</td><td class="sticky-col">屏東車站</td><td class="pct-mid">50.0%</td><td class="pct-mid">41.0%</td><td class="pct-mid">41.0%</td><td class="pct-low">36.7%</td></tr>
+<tr><td>36</td><td class="sticky-col">新光三越台南小西門</td><td class="pct-mid">50.0%</td><td class="pct-mid">46.0%</td><td class="pct-mid">44.5%</td><td class="pct-mid">43.7%</td></tr>
+<tr><td>37</td><td class="sticky-col">新光三越台中中港</td><td class="pct-mid">48.0%</td><td class="pct-mid">44.0%</td><td class="pct-mid">48.0%</td><td class="pct-mid">49.0%</td></tr>
+<tr><td>38</td><td class="sticky-col">淡水</td><td class="pct-mid">48.0%</td><td class="pct-mid">47.0%</td><td class="pct-mid">56.5%</td><td class="pct-mid">58.3%</td></tr>
+<tr><td>39</td><td class="sticky-col">美麗華</td><td class="pct-mid">48.0%</td><td class="pct-mid">47.0%</td><td class="pct-mid">49.0%</td><td class="pct-mid">52.3%</td></tr>
+<tr><td>40</td><td class="sticky-col">內湖CITYLINK</td><td class="pct-mid">46.0%</td><td class="pct-mid">50.0%</td><td class="pct-mid">51.0%</td><td class="pct-mid">52.7%</td></tr>
+<tr><td>41</td><td class="sticky-col">秀泰台東</td><td class="pct-mid">46.0%</td><td class="pct-mid">49.0%</td><td class="pct-mid">51.0%</td><td class="pct-mid">49.7%</td></tr>
+<tr><td>42</td><td class="sticky-col">西門漢中</td><td class="pct-mid">46.0%</td><td class="pct-mid">43.0%</td><td class="pct-mid">46.0%</td><td class="pct-mid">50.3%</td></tr>
+<tr><td>43</td><td class="sticky-col">台中新時代</td><td class="pct-mid">44.0%</td><td class="pct-mid">43.0%</td><td class="pct-mid">51.0%</td><td class="pct-mid">50.3%</td></tr>
+<tr><td>44</td><td class="sticky-col">微風 台北車站</td><td class="pct-mid">44.0%</td><td class="pct-mid">46.0%</td><td class="pct-mid">56.5%</td><td class="pct-mid">57.3%</td></tr>
+<tr><td>45</td><td class="sticky-col">頭份大全聯</td><td class="pct-mid">44.0%</td><td class="pct-low">36.0%</td><td class="pct-low">34.5%</td><td class="pct-low">36.3%</td></tr>
+<tr><td>46</td><td class="sticky-col">高雄SKM Park</td><td class="pct-mid">44.0%</td><td class="pct-mid">41.0%</td><td class="pct-mid">42.0%</td><td class="pct-low">38.7%</td></tr>
+<tr><td>47</td><td class="sticky-col">高雄三多SOGO</td><td class="pct-mid">44.0%</td><td class="pct-mid">42.0%</td><td class="pct-mid">42.0%</td><td class="pct-mid">41.3%</td></tr>
+<tr><td>48</td><td class="sticky-col">LaLaport南港</td><td class="pct-mid">42.0%</td><td class="pct-mid">44.0%</td><td class="pct-mid">48.5%</td><td class="pct-mid">52.3%</td></tr>
+<tr><td>49</td><td class="sticky-col">三峽</td><td class="pct-mid">42.0%</td><td class="pct-low">37.0%</td><td class="pct-low">36.5%</td><td class="pct-low">33.7%</td></tr>
+<tr><td>50</td><td class="sticky-col">新光影城桃園高鐵</td><td class="pct-mid">42.0%</td><td class="pct-low">31.0%</td><td class="pct-low">32.0%</td><td class="pct-low">32.0%</td></tr>
+<tr><td>51</td><td class="sticky-col">新莊民安</td><td class="pct-mid">42.0%</td><td class="pct-low">40.0%</td><td class="pct-low">36.5%</td><td class="pct-low">33.3%</td></tr>
+<tr><td>52</td><td class="sticky-col">秀泰嘉義</td><td class="pct-mid">42.0%</td><td class="pct-mid">49.0%</td><td class="pct-mid">56.0%</td><td class="pct-mid">54.7%</td></tr>
+<tr><td>53</td><td class="sticky-col">遠百竹北</td><td class="pct-mid">42.0%</td><td class="pct-mid">43.0%</td><td class="pct-mid">51.0%</td><td class="pct-mid">52.3%</td></tr>
+<tr><td>54</td><td class="sticky-col">JC PARK新莊</td><td class="pct-low">40.0%</td><td class="pct-mid">52.0%</td><td class="pct-mid">58.0%</td><td class="pct-mid">58.3%</td></tr>
+<tr><td>55</td><td class="sticky-col">台中大遠百</td><td class="pct-low">40.0%</td><td class="pct-low">38.0%</td><td class="pct-low">40.0%</td><td class="pct-mid">43.3%</td></tr>
+<tr><td>56</td><td class="sticky-col">台北永康</td><td class="pct-low">40.0%</td><td class="pct-mid">46.0%</td><td class="pct-mid">53.5%</td><td class="pct-mid">57.0%</td></tr>
+<tr><td>57</td><td class="sticky-col">大江購物中心</td><td class="pct-low">40.0%</td><td class="pct-low">36.0%</td><td class="pct-mid">40.5%</td><td class="pct-mid">42.7%</td></tr>
+<tr><td>58</td><td class="sticky-col">秀泰樹林</td><td class="pct-low">40.0%</td><td class="pct-mid">41.0%</td><td class="pct-mid">47.0%</td><td class="pct-mid">49.7%</td></tr>
+<tr><td>59</td><td class="sticky-col">花蓮遠百</td><td class="pct-low">40.0%</td><td class="pct-low">40.0%</td><td class="pct-mid">43.0%</td><td class="pct-mid">43.0%</td></tr>
+<tr><td>60</td><td class="sticky-col">蘆洲佳瑪</td><td class="pct-low">40.0%</td><td class="pct-low">37.0%</td><td class="pct-mid">45.5%</td><td class="pct-mid">45.3%</td></tr>
+<tr><td>61</td><td class="sticky-col">高雄漢神百貨</td><td class="pct-low">40.0%</td><td class="pct-low">37.0%</td><td class="pct-low">37.5%</td><td class="pct-low">36.0%</td></tr>
+<tr><td>62</td><td class="sticky-col">內湖大全聯</td><td class="pct-low">38.0%</td><td class="pct-low">31.0%</td><td class="pct-low">34.5%</td><td class="pct-low">35.7%</td></tr>
+<tr><td>63</td><td class="sticky-col">台北忠孝SOGO</td><td class="pct-low">38.0%</td><td class="pct-low">40.0%</td><td class="pct-mid">47.5%</td><td class="pct-mid">50.7%</td></tr>
+<tr><td>64</td><td class="sticky-col">統一夢廣場</td><td class="pct-low">38.0%</td><td class="pct-low">40.0%</td><td class="pct-mid">41.0%</td><td class="pct-mid">46.3%</td></tr>
+<tr><td>65</td><td class="sticky-col">LaLaport台中</td><td class="pct-low">36.0%</td><td class="pct-low">37.0%</td><td class="pct-mid">41.5%</td><td class="pct-mid">44.7%</td></tr>
+<tr><td>66</td><td class="sticky-col">Mitsui outlet park 林口</td><td class="pct-low">36.0%</td><td class="pct-low">34.0%</td><td class="pct-low">38.5%</td><td class="pct-mid">40.7%</td></tr>
+<tr><td>67</td><td class="sticky-col">內壢家樂福</td><td class="pct-low">36.0%</td><td class="pct-low">35.0%</td><td class="pct-mid">44.0%</td><td class="pct-mid">47.0%</td></tr>
+<tr><td>68</td><td class="sticky-col">忠孝敦化</td><td class="pct-low">36.0%</td><td class="pct-low">36.0%</td><td class="pct-mid">44.5%</td><td class="pct-mid">49.0%</td></tr>
+<tr><td>69</td><td class="sticky-col">新月廣場</td><td class="pct-low">36.0%</td><td class="pct-low">27.0%</td><td class="pct-low">30.5%</td><td class="pct-low">29.0%</td></tr>
+<tr><td>70</td><td class="sticky-col">竹圍</td><td class="pct-low">36.0%</td><td class="pct-low">34.0%</td><td class="pct-low">39.0%</td><td class="pct-low">39.0%</td></tr>
+<tr><td>71</td><td class="sticky-col">經國家樂福</td><td class="pct-low">36.0%</td><td class="pct-low">32.0%</td><td class="pct-low">40.0%</td><td class="pct-mid">43.3%</td></tr>
+<tr><td>72</td><td class="sticky-col">京站小碧潭</td><td class="pct-low">34.0%</td><td class="pct-low">29.0%</td><td class="pct-low">30.0%</td><td class="pct-low">31.7%</td></tr>
+<tr><td>73</td><td class="sticky-col">台中中友</td><td class="pct-low">34.0%</td><td class="pct-low">38.0%</td><td class="pct-mid">41.0%</td><td class="pct-mid">42.3%</td></tr>
+<tr><td>74</td><td class="sticky-col">新光三越嘉義</td><td class="pct-low">34.0%</td><td class="pct-low">39.0%</td><td class="pct-low">36.5%</td><td class="pct-low">36.3%</td></tr>
+<tr><td>75</td><td class="sticky-col">新竹大魯閣</td><td class="pct-low">34.0%</td><td class="pct-low">36.0%</td><td class="pct-mid">43.5%</td><td class="pct-mid">47.7%</td></tr>
+<tr><td>76</td><td class="sticky-col">秀泰台中站前</td><td class="pct-low">34.0%</td><td class="pct-low">34.0%</td><td class="pct-mid">40.5%</td><td class="pct-mid">43.3%</td></tr>
+<tr><td>77</td><td class="sticky-col">板橋愛買</td><td class="pct-low">32.0%</td><td class="pct-low">33.0%</td><td class="pct-low">32.5%</td><td class="pct-low">32.7%</td></tr>
+<tr><td>78</td><td class="sticky-col">環球桃園A8</td><td class="pct-low">32.0%</td><td class="pct-low">26.0%</td><td class="pct-low">25.5%</td><td class="pct-low">27.0%</td></tr>
+<tr><td>79</td><td class="sticky-col">ATT 4 FUN</td><td class="pct-low">30.0%</td><td class="pct-low">32.0%</td><td class="pct-mid">41.0%</td><td class="pct-mid">48.0%</td></tr>
+<tr><td>80</td><td class="sticky-col">中原家樂福</td><td class="pct-low">30.0%</td><td class="pct-low">29.0%</td><td class="pct-low">30.5%</td><td class="pct-low">33.7%</td></tr>
+<tr><td>81</td><td class="sticky-col">京站</td><td class="pct-low">30.0%</td><td class="pct-mid">44.0%</td><td class="pct-mid">47.5%</td><td class="pct-mid">51.7%</td></tr>
+<tr><td>82</td><td class="sticky-col">台北天母SOGO</td><td class="pct-low">30.0%</td><td class="pct-low">31.0%</td><td class="pct-low">40.0%</td><td class="pct-mid">46.3%</td></tr>
+<tr><td>83</td><td class="sticky-col">基隆東岸廣場</td><td class="pct-low">30.0%</td><td class="pct-mid">41.0%</td><td class="pct-mid">44.5%</td><td class="pct-mid">47.3%</td></tr>
+<tr><td>84</td><td class="sticky-col">桃園ATT</td><td class="pct-low">30.0%</td><td class="pct-low">34.0%</td><td class="pct-mid">41.0%</td><td class="pct-mid">46.7%</td></tr>
+<tr><td>85</td><td class="sticky-col">新光三越信義A11</td><td class="pct-low">28.0%</td><td class="pct-low">35.0%</td><td class="pct-mid">47.5%</td><td class="pct-mid">52.7%</td></tr>
+<tr><td>86</td><td class="sticky-col">新店佳瑪</td><td class="pct-low">28.0%</td><td class="pct-low">32.0%</td><td class="pct-low">34.0%</td><td class="pct-low">35.7%</td></tr>
+<tr><td>87</td><td class="sticky-col">竹馬</td><td class="pct-low">28.0%</td><td class="pct-low">31.0%</td><td class="pct-low">39.5%</td><td class="pct-mid">42.3%</td></tr>
+<tr><td>88</td><td class="sticky-col">新店家樂福</td><td class="pct-low">26.0%</td><td class="pct-low">32.0%</td><td class="pct-mid">43.5%</td><td class="pct-mid">46.3%</td></tr>
+<tr><td>89</td><td class="sticky-col">澎湖三號港</td><td class="pct-low">18.0%</td><td class="pct-low">28.0%</td><td class="pct-low">32.5%</td><td class="pct-low">33.0%</td></tr>
+<tr><td>90</td><td class="sticky-col">環球中和</td><td class="pct-low">18.0%</td><td class="pct-low">11.0%</td><td class="pct-low">8.0%</td><td class="pct-low">9.0%</td></tr>
+<tr><td>91</td><td class="sticky-col">漢神洲際</td><td class="pct-low">10.0%</td><td class="pct-low">12.0%</td><td class="pct-low">12.0%</td><td class="pct-low">12.0%</td></tr>
+<tr><td>92</td><td class="sticky-col">潮州車站</td><td class="pct-low">6.0%</td><td class="pct-low">6.0%</td><td class="pct-low">7.0%</td><td class="pct-low">11.3%</td></tr>
+<tr><td>93</td><td class="sticky-col">台北微風廣場</td><td class="pct-low">2.0%</td><td class="pct-low">4.0%</td><td class="pct-low">6.5%</td><td class="pct-low">7.0%</td></tr>
+<tr><td>94</td><td class="sticky-col">大巨蛋SOGO</td><td class="pct-low">0.0%</td><td class="pct-low">0.0%</td><td class="pct-low">0.0%</td><td class="pct-low">0.0%</td></tr>
+</tbody></table></div></div></div>
+
+<!-- Tab 2: Brand Matrix -->
+<div id="tab-brand" class="tab-content">
+<div class="section">
+  <h2 class="green">各門市 Brand 可展示 SKU 數 (在庫≥2)</h2>
+  <div class="filter-bar">
+    <input type="text" id="filter-brand-store" placeholder="搜尋門市..." oninput="filterTable('brand-table', 1, this.value)">
+  </div>
+  <div class="scroll-wrapper">
+  <table id="brand-table">
+  <thead><tr><th>No.</th><th>門市</th><th class="green">OWNDAYS SUNGLASSES COLLECTION</th><th class="green">AIR Ultem</th><th class="green">Graph Belle</th><th class="green">John Dillinger</th><th class="green">collaboration</th><th class="green">NICHE Frame</th><th class="green">OWNDAYS</th><th class="green">AIR FIT</th><th class="green">OWNDAYS Plastic</th><th class="green">Junni Frame</th><th class="green">FUWA CELLU</th><th class="green">OWNDAYS Metal</th><th class="green">OWNDAYS SNAP</th><th class="green">lillybell</th><th class="green">ECO2XY</th><th class="green">K.moriyama</th><th class="green">Based</th><th class="green">AIR Ultem Classic</th><th class="green">OWNDAYS+</th><th class="green">AIR For Men</th><th class="green">Memory Metal</th><th class="green">千一作</th><th class="green">Limited Edition</th><th class="green">Amber</th><th class="green">OWNDAYS SNAP Le</th><th class="green">BUTTERFLY EFFECT</th><th class="green">Basic Sunglasses Collection</th><th class="green">MONKY FLIP</th><th class="green">Junni Sunglasses</th><th class="green">NICHE Sunglasses</th><th class="green">OWNDAYS PORTABLE</th><th class="green">OWNDAYS SLIM</th><th class="green">SWAROVSKI</th><th class="green">ZOO</th><th class="green">marcus raw</th></tr></thead>
+<tbody>
+<tr><td>1</td><td class="sticky-col">三重重新家楽福</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>2</td><td class="sticky-col">勤美誠品</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>3</td><td class="sticky-col">南崁佳瑪</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>4</td><td class="sticky-col">台中廣三SOGO</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>5</td><td class="sticky-col">台南FOCUS</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>6</td><td class="sticky-col">嘉義NICE</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>7</td><td class="sticky-col">大統五福</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>8</td><td class="sticky-col">宜蘭金東購物商場</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>9</td><td class="sticky-col">微風 松高</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>10</td><td class="sticky-col">新竹站前SOGO</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>11</td><td class="sticky-col">淡水大都會廣場</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>12</td><td class="sticky-col">環球南港</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>13</td><td class="sticky-col">秀泰岡山</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>14</td><td class="sticky-col">新莊宏匯</td><td class="val-ok">109</td><td class="val-ok">40</td><td class="val-ok">49</td><td class="val-ok">50</td><td class="val-ok">32</td><td class="val-ok">29</td><td class="val-ok">21</td><td class="val-ok">20</td><td class="val-ok">20</td><td class="val-ok">19</td><td class="val-ok">25</td><td class="val-ok">17</td><td class="val-ok">11</td><td class="val-ok">17</td><td class="val-ok">16</td><td class="val-ok">5</td><td class="val-ok">8</td><td class="val-ok">7</td><td class="val-ok">4</td><td class="val-ok">4</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-ok">3</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>15</td><td class="sticky-col">漢神巨蛋</td><td class="val-ok">117</td><td class="val-ok">54</td><td class="val-ok">61</td><td class="val-ok">33</td><td class="val-ok">82</td><td class="val-ok">27</td><td class="val-ok">46</td><td class="val-ok">33</td><td class="val-ok">15</td><td class="val-ok">36</td><td class="val-ok">15</td><td class="val-ok">24</td><td class="val-ok">23</td><td class="val-ok">5</td><td class="val-ok">19</td><td class="val-ok">25</td><td class="val-ok">21</td><td class="val-ok">3</td><td class="val-ok">4</td><td class="val-ok">9</td><td class="val-ok">10</td><td class="val-ok">27</td><td class="val-ok">10</td><td class="val-low">1</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>16</td><td class="sticky-col">石牌</td><td class="val-ok">137</td><td class="val-ok">62</td><td class="val-ok">63</td><td class="val-ok">51</td><td class="val-ok">34</td><td class="val-ok">34</td><td class="val-ok">22</td><td class="val-ok">19</td><td class="val-ok">13</td><td class="val-ok">21</td><td class="val-ok">9</td><td class="val-ok">18</td><td class="val-ok">17</td><td class="val-ok">15</td><td class="val-ok">8</td><td class="val-ok">13</td><td class="val-ok">17</td><td class="val-ok">8</td><td class="val-ok">6</td><td class="val-ok">6</td><td class="val-ok">7</td><td class="val-ok">31</td><td class="val-ok">7</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>17</td><td class="sticky-col">MITSUI OUTLET PARK 台南</td><td class="val-ok">120</td><td class="val-ok">90</td><td class="val-ok">62</td><td class="val-ok">55</td><td class="val-ok">35</td><td class="val-ok">44</td><td class="val-ok">21</td><td class="val-ok">31</td><td class="val-ok">35</td><td class="val-ok">26</td><td class="val-ok">46</td><td class="val-ok">32</td><td class="val-ok">16</td><td class="val-ok">18</td><td class="val-ok">26</td><td class="val-ok">22</td><td class="val-ok">16</td><td class="val-ok">13</td><td class="val-ok">16</td><td class="val-ok">9</td><td class="val-ok">8</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-ok">12</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>18</td><td class="sticky-col">南紡購物中心</td><td class="val-ok">135</td><td class="val-ok">70</td><td class="val-ok">45</td><td class="val-ok">45</td><td class="val-ok">58</td><td class="val-ok">38</td><td class="val-ok">29</td><td class="val-ok">27</td><td class="val-ok">39</td><td class="val-ok">20</td><td class="val-ok">36</td><td class="val-ok">17</td><td class="val-ok">15</td><td class="val-ok">11</td><td class="val-ok">19</td><td class="val-ok">12</td><td class="val-ok">14</td><td class="val-ok">7</td><td class="val-ok">18</td><td class="val-ok">13</td><td class="val-ok">6</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>19</td><td class="sticky-col">八德置地生活</td><td class="val-ok">93</td><td class="val-ok">59</td><td class="val-ok">52</td><td class="val-ok">51</td><td class="val-ok">53</td><td class="val-ok">31</td><td class="val-ok">25</td><td class="val-ok">19</td><td class="val-ok">30</td><td class="val-ok">19</td><td class="val-ok">17</td><td class="val-ok">20</td><td class="val-ok">17</td><td class="val-ok">13</td><td class="val-ok">19</td><td class="val-ok">7</td><td class="val-ok">15</td><td class="val-ok">6</td><td class="val-ok">10</td><td class="val-ok">4</td><td class="val-ok">6</td><td class="val-zero">0</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>20</td><td class="sticky-col">公館</td><td class="val-ok">124</td><td class="val-ok">49</td><td class="val-ok">48</td><td class="val-ok">37</td><td class="val-ok">28</td><td class="val-ok">31</td><td class="val-ok">20</td><td class="val-ok">21</td><td class="val-ok">18</td><td class="val-ok">24</td><td class="val-ok">16</td><td class="val-ok">14</td><td class="val-ok">11</td><td class="val-ok">9</td><td class="val-ok">16</td><td class="val-ok">10</td><td class="val-ok">13</td><td class="val-ok">9</td><td class="val-low">2</td><td class="val-ok">7</td><td class="val-ok">6</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>21</td><td class="sticky-col">高雄夢時代</td><td class="val-ok">149</td><td class="val-ok">92</td><td class="val-ok">72</td><td class="val-ok">57</td><td class="val-ok">77</td><td class="val-ok">40</td><td class="val-ok">37</td><td class="val-ok">35</td><td class="val-ok">22</td><td class="val-ok">28</td><td class="val-ok">26</td><td class="val-ok">20</td><td class="val-ok">18</td><td class="val-ok">16</td><td class="val-ok">20</td><td class="val-ok">19</td><td class="val-ok">6</td><td class="val-ok">15</td><td class="val-ok">14</td><td class="val-ok">12</td><td class="val-ok">5</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>22</td><td class="sticky-col">新竹巨城</td><td class="val-ok">162</td><td class="val-ok">62</td><td class="val-ok">50</td><td class="val-ok">43</td><td class="val-ok">90</td><td class="val-ok">35</td><td class="val-ok">44</td><td class="val-ok">24</td><td class="val-ok">10</td><td class="val-ok">18</td><td class="val-ok">19</td><td class="val-ok">10</td><td class="val-ok">18</td><td class="val-ok">13</td><td class="val-ok">18</td><td class="val-ok">10</td><td class="val-ok">20</td><td class="val-ok">7</td><td class="val-ok">15</td><td class="val-ok">9</td><td class="val-ok">10</td><td class="val-ok">26</td><td class="val-ok">9</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>23</td><td class="sticky-col">高雄大遠百</td><td class="val-ok">109</td><td class="val-ok">89</td><td class="val-ok">72</td><td class="val-ok">56</td><td class="val-ok">28</td><td class="val-ok">38</td><td class="val-ok">22</td><td class="val-ok">35</td><td class="val-ok">29</td><td class="val-ok">31</td><td class="val-ok">34</td><td class="val-ok">25</td><td class="val-ok">14</td><td class="val-ok">16</td><td class="val-ok">24</td><td class="val-ok">25</td><td class="val-ok">11</td><td class="val-ok">10</td><td class="val-ok">5</td><td class="val-ok">8</td><td class="val-ok">8</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>24</td><td class="sticky-col">高雄義享</td><td class="val-ok">114</td><td class="val-ok">73</td><td class="val-ok">65</td><td class="val-ok">57</td><td class="val-ok">49</td><td class="val-ok">43</td><td class="val-ok">22</td><td class="val-ok">39</td><td class="val-ok">27</td><td class="val-ok">16</td><td class="val-ok">22</td><td class="val-ok">30</td><td class="val-ok">18</td><td class="val-ok">16</td><td class="val-ok">18</td><td class="val-ok">18</td><td class="val-ok">15</td><td class="val-ok">5</td><td class="val-ok">11</td><td class="val-ok">5</td><td class="val-ok">5</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>25</td><td class="sticky-col">三重佳瑪</td><td class="val-ok">146</td><td class="val-ok">55</td><td class="val-ok">57</td><td class="val-ok">43</td><td class="val-ok">28</td><td class="val-ok">34</td><td class="val-ok">22</td><td class="val-ok">21</td><td class="val-ok">21</td><td class="val-ok">16</td><td class="val-ok">25</td><td class="val-ok">15</td><td class="val-ok">16</td><td class="val-ok">15</td><td class="val-ok">15</td><td class="val-ok">13</td><td class="val-ok">9</td><td class="val-ok">9</td><td class="val-ok">5</td><td class="val-ok">7</td><td class="val-ok">8</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-ok">7</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>26</td><td class="sticky-col">江子翠</td><td class="val-ok">123</td><td class="val-ok">79</td><td class="val-ok">74</td><td class="val-ok">55</td><td class="val-ok">23</td><td class="val-ok">43</td><td class="val-ok">23</td><td class="val-ok">29</td><td class="val-ok">25</td><td class="val-ok">15</td><td class="val-ok">24</td><td class="val-ok">31</td><td class="val-ok">17</td><td class="val-ok">19</td><td class="val-ok">15</td><td class="val-ok">15</td><td class="val-ok">13</td><td class="val-ok">9</td><td class="val-ok">7</td><td class="val-ok">12</td><td class="val-ok">6</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>27</td><td class="sticky-col">微風南京</td><td class="val-ok">126</td><td class="val-ok">41</td><td class="val-ok">61</td><td class="val-ok">38</td><td class="val-ok">26</td><td class="val-ok">27</td><td class="val-ok">21</td><td class="val-ok">13</td><td class="val-ok">25</td><td class="val-ok">12</td><td class="val-ok">5</td><td class="val-ok">16</td><td class="val-ok">10</td><td class="val-ok">18</td><td class="val-ok">8</td><td class="val-ok">4</td><td class="val-ok">13</td><td class="val-ok">7</td><td class="val-low">2</td><td class="val-ok">4</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>28</td><td class="sticky-col">板橋府中</td><td class="val-ok">131</td><td class="val-ok">67</td><td class="val-ok">62</td><td class="val-ok">39</td><td class="val-ok">29</td><td class="val-ok">26</td><td class="val-ok">21</td><td class="val-ok">19</td><td class="val-ok">25</td><td class="val-ok">29</td><td class="val-ok">20</td><td class="val-ok">9</td><td class="val-ok">18</td><td class="val-ok">19</td><td class="val-ok">22</td><td class="val-ok">13</td><td class="val-ok">11</td><td class="val-ok">8</td><td class="val-ok">7</td><td class="val-ok">5</td><td class="val-ok">7</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-ok">8</td><td class="val-ok">3</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>29</td><td class="sticky-col">高雄成功家樂福</td><td class="val-ok">131</td><td class="val-ok">88</td><td class="val-ok">62</td><td class="val-ok">57</td><td class="val-ok">8</td><td class="val-ok">50</td><td class="val-ok">16</td><td class="val-ok">34</td><td class="val-ok">19</td><td class="val-ok">42</td><td class="val-ok">25</td><td class="val-ok">23</td><td class="val-ok">16</td><td class="val-ok">17</td><td class="val-ok">27</td><td class="val-ok">21</td><td class="val-ok">9</td><td class="val-ok">15</td><td class="val-ok">7</td><td class="val-ok">4</td><td class="val-ok">4</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-ok">8</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>30</td><td class="sticky-col">南西</td><td class="val-ok">121</td><td class="val-ok">59</td><td class="val-ok">46</td><td class="val-ok">36</td><td class="val-ok">84</td><td class="val-ok">36</td><td class="val-ok">42</td><td class="val-ok">21</td><td class="val-ok">14</td><td class="val-ok">21</td><td class="val-ok">18</td><td class="val-ok">11</td><td class="val-ok">20</td><td class="val-ok">11</td><td class="val-ok">13</td><td class="val-ok">11</td><td class="val-ok">24</td><td class="val-ok">9</td><td class="val-ok">4</td><td class="val-ok">6</td><td class="val-ok">5</td><td class="val-ok">23</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>31</td><td class="sticky-col">員林大全聯</td><td class="val-ok">106</td><td class="val-ok">76</td><td class="val-ok">52</td><td class="val-ok">61</td><td class="val-ok">42</td><td class="val-ok">44</td><td class="val-ok">22</td><td class="val-ok">23</td><td class="val-ok">41</td><td class="val-ok">30</td><td class="val-ok">27</td><td class="val-ok">15</td><td class="val-ok">18</td><td class="val-ok">13</td><td class="val-ok">22</td><td class="val-ok">16</td><td class="val-ok">19</td><td class="val-ok">14</td><td class="val-ok">12</td><td class="val-ok">10</td><td class="val-ok">15</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>32</td><td class="sticky-col">新光三越高雄左營</td><td class="val-ok">91</td><td class="val-ok">77</td><td class="val-ok">67</td><td class="val-ok">57</td><td class="val-ok">45</td><td class="val-ok">42</td><td class="val-ok">36</td><td class="val-ok">27</td><td class="val-ok">27</td><td class="val-ok">23</td><td class="val-ok">29</td><td class="val-ok">21</td><td class="val-ok">24</td><td class="val-ok">20</td><td class="val-ok">19</td><td class="val-ok">15</td><td class="val-ok">15</td><td class="val-ok">9</td><td class="val-ok">7</td><td class="val-low">2</td><td class="val-ok">4</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-ok">4</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>33</td><td class="sticky-col">環球板橋</td><td class="val-ok">109</td><td class="val-ok">50</td><td class="val-ok">67</td><td class="val-ok">57</td><td class="val-ok">77</td><td class="val-ok">32</td><td class="val-ok">26</td><td class="val-ok">29</td><td class="val-ok">27</td><td class="val-ok">14</td><td class="val-ok">22</td><td class="val-ok">20</td><td class="val-ok">18</td><td class="val-ok">27</td><td class="val-ok">14</td><td class="val-ok">7</td><td class="val-ok">12</td><td class="val-ok">9</td><td class="val-ok">8</td><td class="val-ok">8</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>34</td><td class="sticky-col">台茂購物中心</td><td class="val-ok">95</td><td class="val-ok">62</td><td class="val-ok">59</td><td class="val-ok">60</td><td class="val-ok">23</td><td class="val-ok">42</td><td class="val-ok">33</td><td class="val-ok">24</td><td class="val-ok">23</td><td class="val-ok">18</td><td class="val-ok">29</td><td class="val-ok">23</td><td class="val-ok">17</td><td class="val-ok">15</td><td class="val-ok">18</td><td class="val-ok">3</td><td class="val-ok">17</td><td class="val-ok">11</td><td class="val-ok">7</td><td class="val-ok">12</td><td class="val-ok">9</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>35</td><td class="sticky-col">屏東車站</td><td class="val-ok">160</td><td class="val-ok">118</td><td class="val-ok">86</td><td class="val-ok">74</td><td class="val-ok">20</td><td class="val-ok">54</td><td class="val-ok">21</td><td class="val-ok">43</td><td class="val-ok">51</td><td class="val-ok">43</td><td class="val-ok">31</td><td class="val-ok">38</td><td class="val-ok">17</td><td class="val-ok">27</td><td class="val-ok">32</td><td class="val-ok">29</td><td class="val-ok">19</td><td class="val-ok">12</td><td class="val-ok">20</td><td class="val-ok">6</td><td class="val-ok">12</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>36</td><td class="sticky-col">新光三越台南小西門</td><td class="val-ok">103</td><td class="val-ok">84</td><td class="val-ok">60</td><td class="val-ok">57</td><td class="val-ok">36</td><td class="val-ok">44</td><td class="val-ok">43</td><td class="val-ok">30</td><td class="val-ok">39</td><td class="val-ok">33</td><td class="val-ok">39</td><td class="val-ok">34</td><td class="val-ok">17</td><td class="val-ok">14</td><td class="val-ok">24</td><td class="val-ok">25</td><td class="val-ok">15</td><td class="val-ok">8</td><td class="val-ok">14</td><td class="val-ok">11</td><td class="val-ok">10</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>37</td><td class="sticky-col">新光三越台中中港</td><td class="val-ok">154</td><td class="val-ok">78</td><td class="val-ok">62</td><td class="val-ok">43</td><td class="val-ok">72</td><td class="val-ok">37</td><td class="val-ok">36</td><td class="val-ok">18</td><td class="val-ok">24</td><td class="val-ok">24</td><td class="val-ok">29</td><td class="val-ok">34</td><td class="val-ok">14</td><td class="val-ok">21</td><td class="val-ok">20</td><td class="val-ok">17</td><td class="val-ok">17</td><td class="val-ok">8</td><td class="val-ok">6</td><td class="val-ok">11</td><td class="val-ok">8</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-ok">8</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>38</td><td class="sticky-col">淡水</td><td class="val-ok">135</td><td class="val-ok">56</td><td class="val-ok">50</td><td class="val-ok">45</td><td class="val-ok">57</td><td class="val-ok">27</td><td class="val-ok">37</td><td class="val-ok">20</td><td class="val-ok">5</td><td class="val-ok">29</td><td class="val-ok">6</td><td class="val-ok">6</td><td class="val-ok">18</td><td class="val-ok">10</td><td class="val-ok">9</td><td class="val-ok">9</td><td class="val-ok">9</td><td class="val-ok">9</td><td class="val-low">2</td><td class="val-low">2</td><td class="val-ok">6</td><td class="val-ok">9</td><td class="val-ok">4</td><td class="val-zero">0</td><td class="val-ok">4</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>39</td><td class="sticky-col">美麗華</td><td class="val-ok">133</td><td class="val-ok">58</td><td class="val-ok">62</td><td class="val-ok">40</td><td class="val-ok">71</td><td class="val-ok">39</td><td class="val-ok">31</td><td class="val-ok">16</td><td class="val-ok">13</td><td class="val-ok">17</td><td class="val-ok">10</td><td class="val-ok">8</td><td class="val-ok">17</td><td class="val-ok">14</td><td class="val-ok">17</td><td class="val-ok">8</td><td class="val-ok">22</td><td class="val-ok">6</td><td class="val-ok">3</td><td class="val-ok">10</td><td class="val-ok">3</td><td class="val-zero">0</td><td class="val-ok">3</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>40</td><td class="sticky-col">內湖CITYLINK</td><td class="val-ok">105</td><td class="val-ok">50</td><td class="val-ok">52</td><td class="val-ok">39</td><td class="val-ok">51</td><td class="val-ok">40</td><td class="val-ok">27</td><td class="val-ok">19</td><td class="val-ok">22</td><td class="val-ok">15</td><td class="val-ok">6</td><td class="val-ok">15</td><td class="val-ok">12</td><td class="val-ok">20</td><td class="val-ok">16</td><td class="val-ok">7</td><td class="val-ok">12</td><td class="val-ok">5</td><td class="val-low">2</td><td class="val-ok">4</td><td class="val-ok">5</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>41</td><td class="sticky-col">秀泰台東</td><td class="val-ok">118</td><td class="val-ok">79</td><td class="val-ok">63</td><td class="val-ok">67</td><td class="val-ok">48</td><td class="val-ok">34</td><td class="val-ok">36</td><td class="val-ok">53</td><td class="val-ok">31</td><td class="val-ok">27</td><td class="val-ok">27</td><td class="val-ok">39</td><td class="val-ok">23</td><td class="val-ok">12</td><td class="val-ok">8</td><td class="val-ok">33</td><td class="val-ok">12</td><td class="val-ok">12</td><td class="val-ok">7</td><td class="val-ok">6</td><td class="val-ok">11</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>42</td><td class="sticky-col">西門漢中</td><td class="val-ok">90</td><td class="val-ok">60</td><td class="val-ok">69</td><td class="val-ok">51</td><td class="val-ok">40</td><td class="val-ok">26</td><td class="val-ok">32</td><td class="val-ok">15</td><td class="val-ok">10</td><td class="val-ok">27</td><td class="val-ok">22</td><td class="val-ok">22</td><td class="val-ok">18</td><td class="val-ok">17</td><td class="val-ok">11</td><td class="val-ok">8</td><td class="val-ok">9</td><td class="val-ok">6</td><td class="val-ok">3</td><td class="val-zero">0</td><td class="val-ok">4</td><td class="val-zero">0</td><td class="val-ok">3</td><td class="val-zero">0</td><td class="val-ok">4</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>43</td><td class="sticky-col">台中新時代</td><td class="val-ok">105</td><td class="val-ok">54</td><td class="val-ok">66</td><td class="val-ok">44</td><td class="val-ok">20</td><td class="val-ok">44</td><td class="val-ok">28</td><td class="val-ok">25</td><td class="val-ok">29</td><td class="val-ok">29</td><td class="val-ok">24</td><td class="val-ok">19</td><td class="val-ok">18</td><td class="val-ok">11</td><td class="val-ok">18</td><td class="val-ok">12</td><td class="val-ok">9</td><td class="val-ok">9</td><td class="val-ok">11</td><td class="val-ok">9</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>44</td><td class="sticky-col">微風 台北車站</td><td class="val-ok">81</td><td class="val-ok">52</td><td class="val-ok">48</td><td class="val-ok">39</td><td class="val-ok">37</td><td class="val-ok">35</td><td class="val-ok">25</td><td class="val-ok">17</td><td class="val-ok">14</td><td class="val-ok">20</td><td class="val-ok">11</td><td class="val-ok">20</td><td class="val-ok">13</td><td class="val-ok">11</td><td class="val-ok">9</td><td class="val-ok">3</td><td class="val-ok">11</td><td class="val-ok">10</td><td class="val-low">1</td><td class="val-ok">3</td><td class="val-low">1</td><td class="val-ok">25</td><td class="val-ok">6</td><td class="val-ok">6</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>45</td><td class="sticky-col">頭份大全聯</td><td class="val-ok">169</td><td class="val-ok">95</td><td class="val-ok">86</td><td class="val-ok">71</td><td class="val-ok">32</td><td class="val-ok">46</td><td class="val-ok">29</td><td class="val-ok">33</td><td class="val-ok">24</td><td class="val-ok">27</td><td class="val-ok">40</td><td class="val-ok">28</td><td class="val-ok">26</td><td class="val-ok">19</td><td class="val-ok">18</td><td class="val-ok">27</td><td class="val-ok">17</td><td class="val-ok">16</td><td class="val-ok">12</td><td class="val-ok">9</td><td class="val-ok">16</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>46</td><td class="sticky-col">高雄SKM Park</td><td class="val-ok">137</td><td class="val-ok">98</td><td class="val-ok">65</td><td class="val-ok">62</td><td class="val-ok">22</td><td class="val-ok">45</td><td class="val-ok">23</td><td class="val-ok">42</td><td class="val-ok">40</td><td class="val-ok">24</td><td class="val-ok">39</td><td class="val-ok">27</td><td class="val-ok">22</td><td class="val-ok">24</td><td class="val-ok">20</td><td class="val-ok">17</td><td class="val-ok">15</td><td class="val-ok">17</td><td class="val-ok">11</td><td class="val-ok">8</td><td class="val-ok">6</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>47</td><td class="sticky-col">高雄三多SOGO</td><td class="val-ok">118</td><td class="val-ok">101</td><td class="val-ok">63</td><td class="val-ok">56</td><td class="val-ok">11</td><td class="val-ok">45</td><td class="val-ok">16</td><td class="val-ok">37</td><td class="val-ok">28</td><td class="val-ok">32</td><td class="val-ok">37</td><td class="val-ok">25</td><td class="val-ok">21</td><td class="val-ok">17</td><td class="val-ok">23</td><td class="val-ok">16</td><td class="val-ok">15</td><td class="val-ok">8</td><td class="val-ok">9</td><td class="val-ok">10</td><td class="val-ok">6</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>48</td><td class="sticky-col">LaLaport南港</td><td class="val-ok">97</td><td class="val-ok">61</td><td class="val-ok">61</td><td class="val-ok">38</td><td class="val-ok">42</td><td class="val-ok">35</td><td class="val-ok">27</td><td class="val-ok">20</td><td class="val-ok">15</td><td class="val-ok">13</td><td class="val-ok">20</td><td class="val-ok">19</td><td class="val-ok">18</td><td class="val-ok">13</td><td class="val-ok">14</td><td class="val-ok">11</td><td class="val-ok">17</td><td class="val-ok">4</td><td class="val-ok">3</td><td class="val-ok">9</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>49</td><td class="sticky-col">三峽</td><td class="val-ok">201</td><td class="val-ok">96</td><td class="val-ok">96</td><td class="val-ok">92</td><td class="val-ok">29</td><td class="val-ok">49</td><td class="val-ok">40</td><td class="val-ok">42</td><td class="val-ok">32</td><td class="val-ok">30</td><td class="val-ok">38</td><td class="val-ok">33</td><td class="val-ok">24</td><td class="val-ok">33</td><td class="val-ok">26</td><td class="val-ok">30</td><td class="val-ok">18</td><td class="val-ok">16</td><td class="val-ok">17</td><td class="val-ok">12</td><td class="val-ok">21</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>50</td><td class="sticky-col">新光影城桃園高鐵</td><td class="val-ok">109</td><td class="val-ok">105</td><td class="val-ok">93</td><td class="val-ok">74</td><td class="val-ok">25</td><td class="val-ok">59</td><td class="val-ok">30</td><td class="val-ok">29</td><td class="val-ok">38</td><td class="val-ok">36</td><td class="val-ok">39</td><td class="val-ok">41</td><td class="val-ok">18</td><td class="val-ok">31</td><td class="val-ok">26</td><td class="val-ok">18</td><td class="val-ok">16</td><td class="val-ok">11</td><td class="val-ok">18</td><td class="val-ok">14</td><td class="val-ok">6</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>51</td><td class="sticky-col">新莊民安</td><td class="val-ok">214</td><td class="val-ok">93</td><td class="val-ok">75</td><td class="val-ok">71</td><td class="val-ok">31</td><td class="val-ok">57</td><td class="val-ok">42</td><td class="val-ok">34</td><td class="val-ok">35</td><td class="val-ok">13</td><td class="val-ok">26</td><td class="val-ok">47</td><td class="val-ok">20</td><td class="val-ok">27</td><td class="val-ok">15</td><td class="val-ok">22</td><td class="val-ok">13</td><td class="val-ok">12</td><td class="val-ok">22</td><td class="val-ok">12</td><td class="val-ok">20</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>52</td><td class="sticky-col">秀泰嘉義</td><td class="val-ok">59</td><td class="val-ok">77</td><td class="val-ok">42</td><td class="val-ok">42</td><td class="val-ok">59</td><td class="val-ok">28</td><td class="val-ok">24</td><td class="val-ok">23</td><td class="val-ok">34</td><td class="val-ok">33</td><td class="val-ok">33</td><td class="val-ok">28</td><td class="val-ok">11</td><td class="val-ok">7</td><td class="val-ok">21</td><td class="val-ok">11</td><td class="val-ok">10</td><td class="val-ok">9</td><td class="val-ok">4</td><td class="val-ok">14</td><td class="val-ok">4</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>53</td><td class="sticky-col">遠百竹北</td><td class="val-ok">137</td><td class="val-ok">52</td><td class="val-ok">62</td><td class="val-ok">41</td><td class="val-ok">30</td><td class="val-ok">37</td><td class="val-ok">14</td><td class="val-ok">17</td><td class="val-ok">24</td><td class="val-ok">19</td><td class="val-ok">20</td><td class="val-ok">24</td><td class="val-ok">19</td><td class="val-ok">16</td><td class="val-ok">10</td><td class="val-ok">19</td><td class="val-ok">12</td><td class="val-ok">8</td><td class="val-ok">12</td><td class="val-ok">5</td><td class="val-ok">7</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>54</td><td class="sticky-col">JC PARK新莊</td><td class="val-ok">133</td><td class="val-ok">55</td><td class="val-ok">52</td><td class="val-ok">41</td><td class="val-ok">33</td><td class="val-ok">33</td><td class="val-ok">28</td><td class="val-ok">12</td><td class="val-ok">15</td><td class="val-ok">19</td><td class="val-ok">13</td><td class="val-ok">9</td><td class="val-ok">22</td><td class="val-ok">17</td><td class="val-ok">17</td><td class="val-ok">9</td><td class="val-ok">8</td><td class="val-ok">8</td><td class="val-ok">9</td><td class="val-ok">8</td><td class="val-ok">4</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>55</td><td class="sticky-col">台中大遠百</td><td class="val-ok">133</td><td class="val-ok">63</td><td class="val-ok">56</td><td class="val-ok">44</td><td class="val-ok">76</td><td class="val-ok">47</td><td class="val-ok">40</td><td class="val-ok">30</td><td class="val-ok">37</td><td class="val-ok">39</td><td class="val-ok">19</td><td class="val-ok">30</td><td class="val-ok">18</td><td class="val-ok">16</td><td class="val-ok">9</td><td class="val-ok">12</td><td class="val-ok">19</td><td class="val-ok">11</td><td class="val-ok">11</td><td class="val-ok">3</td><td class="val-ok">7</td><td class="val-zero">0</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>56</td><td class="sticky-col">台北永康</td><td class="val-ok">68</td><td class="val-ok">58</td><td class="val-ok">60</td><td class="val-ok">48</td><td class="val-ok">31</td><td class="val-ok">42</td><td class="val-ok">28</td><td class="val-ok">23</td><td class="val-ok">25</td><td class="val-ok">24</td><td class="val-ok">14</td><td class="val-ok">22</td><td class="val-ok">17</td><td class="val-ok">16</td><td class="val-ok">6</td><td class="val-ok">14</td><td class="val-ok">14</td><td class="val-ok">10</td><td class="val-ok">4</td><td class="val-ok">5</td><td class="val-ok">11</td><td class="val-ok">25</td><td class="val-ok">9</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>57</td><td class="sticky-col">大江購物中心</td><td class="val-ok">149</td><td class="val-ok">93</td><td class="val-ok">74</td><td class="val-ok">68</td><td class="val-ok">80</td><td class="val-ok">41</td><td class="val-ok">31</td><td class="val-ok">23</td><td class="val-ok">22</td><td class="val-ok">27</td><td class="val-ok">13</td><td class="val-ok">28</td><td class="val-ok">26</td><td class="val-ok">25</td><td class="val-ok">19</td><td class="val-ok">34</td><td class="val-ok">28</td><td class="val-ok">7</td><td class="val-ok">7</td><td class="val-ok">14</td><td class="val-ok">8</td><td class="val-ok">26</td><td class="val-ok">19</td><td class="val-ok">12</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>58</td><td class="sticky-col">秀泰樹林</td><td class="val-ok">124</td><td class="val-ok">76</td><td class="val-ok">59</td><td class="val-ok">43</td><td class="val-ok">36</td><td class="val-ok">29</td><td class="val-ok">35</td><td class="val-ok">16</td><td class="val-ok">23</td><td class="val-ok">23</td><td class="val-ok">13</td><td class="val-ok">19</td><td class="val-ok">21</td><td class="val-ok">16</td><td class="val-ok">17</td><td class="val-ok">9</td><td class="val-ok">9</td><td class="val-ok">11</td><td class="val-ok">9</td><td class="val-ok">5</td><td class="val-ok">3</td><td class="val-zero">0</td><td class="val-ok">4</td><td class="val-zero">0</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>59</td><td class="sticky-col">花蓮遠百</td><td class="val-ok">135</td><td class="val-ok">100</td><td class="val-ok">61</td><td class="val-ok">47</td><td class="val-ok">80</td><td class="val-ok">36</td><td class="val-ok">34</td><td class="val-ok">27</td><td class="val-ok">34</td><td class="val-ok">26</td><td class="val-ok">22</td><td class="val-ok">23</td><td class="val-ok">22</td><td class="val-ok">20</td><td class="val-ok">23</td><td class="val-ok">27</td><td class="val-ok">14</td><td class="val-ok">12</td><td class="val-ok">10</td><td class="val-ok">10</td><td class="val-ok">4</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>60</td><td class="sticky-col">蘆洲佳瑪</td><td class="val-ok">178</td><td class="val-ok">73</td><td class="val-ok">63</td><td class="val-ok">52</td><td class="val-ok">32</td><td class="val-ok">40</td><td class="val-ok">29</td><td class="val-ok">18</td><td class="val-ok">17</td><td class="val-ok">22</td><td class="val-ok">18</td><td class="val-ok">18</td><td class="val-ok">25</td><td class="val-ok">9</td><td class="val-ok">12</td><td class="val-ok">10</td><td class="val-ok">12</td><td class="val-ok">14</td><td class="val-ok">9</td><td class="val-ok">5</td><td class="val-ok">5</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>61</td><td class="sticky-col">高雄漢神百貨</td><td class="val-ok">96</td><td class="val-ok">103</td><td class="val-ok">76</td><td class="val-ok">65</td><td class="val-ok">43</td><td class="val-ok">52</td><td class="val-ok">25</td><td class="val-ok">47</td><td class="val-ok">47</td><td class="val-ok">38</td><td class="val-ok">48</td><td class="val-ok">30</td><td class="val-ok">22</td><td class="val-ok">26</td><td class="val-ok">28</td><td class="val-ok">19</td><td class="val-ok">13</td><td class="val-ok">11</td><td class="val-ok">13</td><td class="val-ok">3</td><td class="val-ok">8</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>62</td><td class="sticky-col">內湖大全聯</td><td class="val-ok">159</td><td class="val-ok">88</td><td class="val-ok">77</td><td class="val-ok">56</td><td class="val-ok">34</td><td class="val-ok">54</td><td class="val-ok">36</td><td class="val-ok">24</td><td class="val-ok">43</td><td class="val-ok">38</td><td class="val-ok">34</td><td class="val-ok">28</td><td class="val-ok">22</td><td class="val-ok">24</td><td class="val-ok">24</td><td class="val-ok">14</td><td class="val-ok">17</td><td class="val-ok">13</td><td class="val-ok">6</td><td class="val-ok">8</td><td class="val-ok">17</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>63</td><td class="sticky-col">台北忠孝SOGO</td><td class="val-ok">62</td><td class="val-ok">41</td><td class="val-ok">45</td><td class="val-ok">46</td><td class="val-ok">79</td><td class="val-ok">37</td><td class="val-ok">32</td><td class="val-ok">18</td><td class="val-ok">10</td><td class="val-ok">22</td><td class="val-ok">6</td><td class="val-ok">11</td><td class="val-ok">23</td><td class="val-ok">13</td><td class="val-ok">10</td><td class="val-ok">11</td><td class="val-ok">13</td><td class="val-ok">6</td><td class="val-low">2</td><td class="val-ok">8</td><td class="val-ok">4</td><td class="val-ok">24</td><td class="val-ok">13</td><td class="val-ok">3</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>64</td><td class="sticky-col">統一夢廣場</td><td class="val-ok">115</td><td class="val-ok">74</td><td class="val-ok">59</td><td class="val-ok">41</td><td class="val-ok">35</td><td class="val-ok">42</td><td class="val-ok">38</td><td class="val-ok">20</td><td class="val-ok">22</td><td class="val-ok">14</td><td class="val-ok">15</td><td class="val-ok">23</td><td class="val-ok">15</td><td class="val-ok">26</td><td class="val-ok">13</td><td class="val-ok">13</td><td class="val-ok">14</td><td class="val-ok">9</td><td class="val-ok">6</td><td class="val-ok">7</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>65</td><td class="sticky-col">LaLaport台中</td><td class="val-ok">151</td><td class="val-ok">88</td><td class="val-ok">69</td><td class="val-ok">44</td><td class="val-ok">52</td><td class="val-ok">44</td><td class="val-ok">56</td><td class="val-ok">33</td><td class="val-ok">29</td><td class="val-ok">24</td><td class="val-ok">26</td><td class="val-ok">28</td><td class="val-ok">21</td><td class="val-ok">19</td><td class="val-ok">19</td><td class="val-ok">18</td><td class="val-ok">17</td><td class="val-ok">9</td><td class="val-ok">15</td><td class="val-ok">4</td><td class="val-ok">7</td><td class="val-ok">28</td><td class="val-ok">3</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>66</td><td class="sticky-col">Mitsui outlet park 林口</td><td class="val-ok">178</td><td class="val-ok">75</td><td class="val-ok">78</td><td class="val-ok">63</td><td class="val-ok">101</td><td class="val-ok">50</td><td class="val-ok">60</td><td class="val-ok">29</td><td class="val-ok">38</td><td class="val-ok">18</td><td class="val-ok">44</td><td class="val-ok">31</td><td class="val-ok">27</td><td class="val-ok">34</td><td class="val-ok">20</td><td class="val-ok">24</td><td class="val-ok">18</td><td class="val-ok">9</td><td class="val-ok">14</td><td class="val-ok">8</td><td class="val-ok">8</td><td class="val-ok">28</td><td class="val-ok">18</td><td class="val-ok">6</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>67</td><td class="sticky-col">內壢家樂福</td><td class="val-ok">149</td><td class="val-ok">57</td><td class="val-ok">59</td><td class="val-ok">52</td><td class="val-ok">53</td><td class="val-ok">47</td><td class="val-ok">35</td><td class="val-ok">24</td><td class="val-ok">31</td><td class="val-ok">19</td><td class="val-ok">29</td><td class="val-ok">25</td><td class="val-ok">23</td><td class="val-ok">18</td><td class="val-ok">19</td><td class="val-ok">16</td><td class="val-ok">13</td><td class="val-ok">9</td><td class="val-ok">8</td><td class="val-ok">6</td><td class="val-ok">7</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-ok">5</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>68</td><td class="sticky-col">忠孝敦化</td><td class="val-ok">119</td><td class="val-ok">59</td><td class="val-ok">54</td><td class="val-ok">28</td><td class="val-ok">77</td><td class="val-ok">29</td><td class="val-ok">31</td><td class="val-ok">20</td><td class="val-ok">28</td><td class="val-ok">27</td><td class="val-ok">12</td><td class="val-ok">24</td><td class="val-ok">17</td><td class="val-ok">14</td><td class="val-ok">17</td><td class="val-ok">8</td><td class="val-ok">10</td><td class="val-ok">4</td><td class="val-low">2</td><td class="val-ok">7</td><td class="val-ok">5</td><td class="val-ok">26</td><td class="val-ok">14</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>69</td><td class="sticky-col">新月廣場</td><td class="val-ok">164</td><td class="val-ok">107</td><td class="val-ok">85</td><td class="val-ok">79</td><td class="val-ok">33</td><td class="val-ok">60</td><td class="val-ok">41</td><td class="val-ok">46</td><td class="val-ok">44</td><td class="val-ok">43</td><td class="val-ok">55</td><td class="val-ok">44</td><td class="val-ok">21</td><td class="val-ok">33</td><td class="val-ok">23</td><td class="val-ok">38</td><td class="val-ok">35</td><td class="val-ok">17</td><td class="val-ok">18</td><td class="val-ok">16</td><td class="val-ok">25</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>70</td><td class="sticky-col">竹圍</td><td class="val-ok">131</td><td class="val-ok">72</td><td class="val-ok">80</td><td class="val-ok">59</td><td class="val-ok">40</td><td class="val-ok">58</td><td class="val-ok">28</td><td class="val-ok">45</td><td class="val-ok">20</td><td class="val-ok">18</td><td class="val-ok">24</td><td class="val-ok">27</td><td class="val-ok">20</td><td class="val-ok">26</td><td class="val-ok">21</td><td class="val-ok">22</td><td class="val-ok">20</td><td class="val-ok">12</td><td class="val-ok">9</td><td class="val-ok">4</td><td class="val-ok">3</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>71</td><td class="sticky-col">經國家樂福</td><td class="val-ok">103</td><td class="val-ok">55</td><td class="val-ok">74</td><td class="val-ok">55</td><td class="val-ok">33</td><td class="val-ok">49</td><td class="val-ok">33</td><td class="val-ok">34</td><td class="val-ok">20</td><td class="val-ok">13</td><td class="val-ok">24</td><td class="val-ok">12</td><td class="val-ok">28</td><td class="val-ok">17</td><td class="val-ok">16</td><td class="val-ok">9</td><td class="val-ok">13</td><td class="val-ok">9</td><td class="val-ok">15</td><td class="val-ok">9</td><td class="val-ok">5</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-ok">4</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>72</td><td class="sticky-col">京站小碧潭</td><td class="val-ok">168</td><td class="val-ok">78</td><td class="val-ok">79</td><td class="val-ok">60</td><td class="val-ok">31</td><td class="val-ok">47</td><td class="val-ok">35</td><td class="val-ok">33</td><td class="val-ok">36</td><td class="val-ok">15</td><td class="val-ok">18</td><td class="val-ok">28</td><td class="val-ok">23</td><td class="val-ok">27</td><td class="val-ok">18</td><td class="val-ok">23</td><td class="val-ok">15</td><td class="val-ok">18</td><td class="val-ok">11</td><td class="val-ok">11</td><td class="val-ok">8</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>73</td><td class="sticky-col">台中中友</td><td class="val-ok">102</td><td class="val-ok">94</td><td class="val-ok">65</td><td class="val-ok">51</td><td class="val-ok">57</td><td class="val-ok">44</td><td class="val-ok">38</td><td class="val-ok">35</td><td class="val-ok">40</td><td class="val-ok">37</td><td class="val-ok">46</td><td class="val-ok">28</td><td class="val-ok">24</td><td class="val-ok">16</td><td class="val-ok">20</td><td class="val-ok">22</td><td class="val-ok">19</td><td class="val-ok">12</td><td class="val-ok">18</td><td class="val-ok">11</td><td class="val-ok">13</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-ok">7</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>74</td><td class="sticky-col">新光三越嘉義</td><td class="val-ok">140</td><td class="val-ok">106</td><td class="val-ok">74</td><td class="val-ok">74</td><td class="val-ok">10</td><td class="val-ok">57</td><td class="val-ok">28</td><td class="val-ok">44</td><td class="val-ok">34</td><td class="val-ok">31</td><td class="val-ok">27</td><td class="val-ok">31</td><td class="val-ok">16</td><td class="val-ok">23</td><td class="val-ok">23</td><td class="val-ok">25</td><td class="val-ok">23</td><td class="val-ok">10</td><td class="val-ok">17</td><td class="val-ok">16</td><td class="val-ok">16</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>75</td><td class="sticky-col">新竹大魯閣</td><td class="val-ok">108</td><td class="val-ok">84</td><td class="val-ok">69</td><td class="val-ok">55</td><td class="val-ok">52</td><td class="val-ok">46</td><td class="val-ok">25</td><td class="val-ok">32</td><td class="val-ok">19</td><td class="val-ok">19</td><td class="val-ok">16</td><td class="val-ok">20</td><td class="val-ok">17</td><td class="val-ok">14</td><td class="val-ok">21</td><td class="val-ok">17</td><td class="val-ok">17</td><td class="val-ok">10</td><td class="val-ok">8</td><td class="val-ok">8</td><td class="val-ok">9</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>76</td><td class="sticky-col">秀泰台中站前</td><td class="val-ok">145</td><td class="val-ok">93</td><td class="val-ok">74</td><td class="val-ok">49</td><td class="val-ok">27</td><td class="val-ok">43</td><td class="val-ok">20</td><td class="val-ok">32</td><td class="val-ok">32</td><td class="val-ok">33</td><td class="val-ok">27</td><td class="val-ok">26</td><td class="val-ok">17</td><td class="val-ok">15</td><td class="val-ok">17</td><td class="val-ok">11</td><td class="val-ok">13</td><td class="val-ok">11</td><td class="val-ok">15</td><td class="val-ok">6</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>77</td><td class="sticky-col">板橋愛買</td><td class="val-ok">173</td><td class="val-ok">92</td><td class="val-ok">87</td><td class="val-ok">71</td><td class="val-ok">41</td><td class="val-ok">46</td><td class="val-ok">38</td><td class="val-ok">42</td><td class="val-ok">45</td><td class="val-ok">22</td><td class="val-ok">37</td><td class="val-ok">33</td><td class="val-ok">23</td><td class="val-ok">32</td><td class="val-ok">31</td><td class="val-ok">18</td><td class="val-ok">13</td><td class="val-ok">14</td><td class="val-ok">17</td><td class="val-ok">7</td><td class="val-ok">19</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>78</td><td class="sticky-col">環球桃園A8</td><td class="val-ok">164</td><td class="val-ok">105</td><td class="val-ok">84</td><td class="val-ok">72</td><td class="val-ok">24</td><td class="val-ok">61</td><td class="val-ok">48</td><td class="val-ok">36</td><td class="val-ok">48</td><td class="val-ok">22</td><td class="val-ok">45</td><td class="val-ok">39</td><td class="val-ok">25</td><td class="val-ok">26</td><td class="val-ok">21</td><td class="val-ok">22</td><td class="val-ok">21</td><td class="val-ok">15</td><td class="val-ok">21</td><td class="val-ok">14</td><td class="val-ok">16</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>79</td><td class="sticky-col">ATT 4 FUN</td><td class="val-ok">94</td><td class="val-ok">78</td><td class="val-ok">61</td><td class="val-ok">40</td><td class="val-ok">33</td><td class="val-ok">35</td><td class="val-ok">26</td><td class="val-ok">26</td><td class="val-ok">14</td><td class="val-ok">16</td><td class="val-ok">14</td><td class="val-ok">24</td><td class="val-ok">21</td><td class="val-ok">13</td><td class="val-ok">15</td><td class="val-ok">6</td><td class="val-ok">11</td><td class="val-ok">10</td><td class="val-ok">3</td><td class="val-ok">8</td><td class="val-ok">3</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>80</td><td class="sticky-col">中原家樂福</td><td class="val-ok">164</td><td class="val-ok">79</td><td class="val-ok">84</td><td class="val-ok">73</td><td class="val-ok">69</td><td class="val-ok">49</td><td class="val-ok">43</td><td class="val-ok">34</td><td class="val-ok">36</td><td class="val-ok">27</td><td class="val-ok">37</td><td class="val-ok">27</td><td class="val-ok">22</td><td class="val-ok">25</td><td class="val-ok">15</td><td class="val-ok">11</td><td class="val-ok">19</td><td class="val-ok">9</td><td class="val-ok">16</td><td class="val-ok">12</td><td class="val-ok">10</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>81</td><td class="sticky-col">京站</td><td class="val-ok">100</td><td class="val-ok">60</td><td class="val-ok">45</td><td class="val-ok">37</td><td class="val-ok">37</td><td class="val-ok">36</td><td class="val-ok">37</td><td class="val-ok">17</td><td class="val-ok">18</td><td class="val-ok">20</td><td class="val-ok">6</td><td class="val-ok">16</td><td class="val-ok">14</td><td class="val-ok">14</td><td class="val-ok">13</td><td class="val-ok">7</td><td class="val-ok">13</td><td class="val-ok">11</td><td class="val-ok">4</td><td class="val-ok">9</td><td class="val-ok">5</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>82</td><td class="sticky-col">台北天母SOGO</td><td class="val-ok">96</td><td class="val-ok">60</td><td class="val-ok">59</td><td class="val-ok">36</td><td class="val-ok">45</td><td class="val-ok">35</td><td class="val-ok">30</td><td class="val-ok">12</td><td class="val-ok">10</td><td class="val-ok">22</td><td class="val-ok">10</td><td class="val-ok">13</td><td class="val-ok">24</td><td class="val-ok">15</td><td class="val-ok">6</td><td class="val-ok">10</td><td class="val-ok">9</td><td class="val-ok">5</td><td class="val-ok">4</td><td class="val-ok">4</td><td class="val-ok">5</td><td class="val-ok">23</td><td class="val-ok">10</td><td class="val-zero">0</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>83</td><td class="sticky-col">基隆東岸廣場</td><td class="val-ok">118</td><td class="val-ok">63</td><td class="val-ok">54</td><td class="val-ok">52</td><td class="val-ok">76</td><td class="val-ok">35</td><td class="val-ok">33</td><td class="val-ok">23</td><td class="val-ok">30</td><td class="val-ok">23</td><td class="val-ok">14</td><td class="val-ok">14</td><td class="val-ok">22</td><td class="val-ok">15</td><td class="val-ok">12</td><td class="val-ok">6</td><td class="val-ok">15</td><td class="val-ok">10</td><td class="val-ok">7</td><td class="val-ok">7</td><td class="val-ok">9</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>84</td><td class="sticky-col">桃園ATT</td><td class="val-ok">128</td><td class="val-ok">77</td><td class="val-ok">55</td><td class="val-ok">44</td><td class="val-ok">50</td><td class="val-ok">34</td><td class="val-ok">26</td><td class="val-ok">29</td><td class="val-ok">27</td><td class="val-ok">21</td><td class="val-ok">19</td><td class="val-ok">9</td><td class="val-ok">24</td><td class="val-ok">9</td><td class="val-ok">17</td><td class="val-ok">12</td><td class="val-ok">12</td><td class="val-ok">9</td><td class="val-ok">9</td><td class="val-ok">13</td><td class="val-low">2</td><td class="val-zero">0</td><td class="val-ok">4</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>85</td><td class="sticky-col">新光三越信義A11</td><td class="val-ok">81</td><td class="val-ok">58</td><td class="val-ok">50</td><td class="val-ok">34</td><td class="val-ok">71</td><td class="val-ok">30</td><td class="val-ok">25</td><td class="val-ok">22</td><td class="val-ok">16</td><td class="val-ok">19</td><td class="val-ok">19</td><td class="val-ok">27</td><td class="val-ok">21</td><td class="val-ok">10</td><td class="val-ok">16</td><td class="val-ok">13</td><td class="val-ok">11</td><td class="val-ok">8</td><td class="val-low">1</td><td class="val-ok">8</td><td class="val-ok">3</td><td class="val-zero">0</td><td class="val-low">1</td><td class="val-ok">10</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>86</td><td class="sticky-col">新店佳瑪</td><td class="val-ok">139</td><td class="val-ok">75</td><td class="val-ok">74</td><td class="val-ok">67</td><td class="val-ok">40</td><td class="val-ok">50</td><td class="val-ok">41</td><td class="val-ok">23</td><td class="val-ok">31</td><td class="val-ok">12</td><td class="val-ok">17</td><td class="val-ok">22</td><td class="val-ok">23</td><td class="val-ok">23</td><td class="val-ok">22</td><td class="val-ok">17</td><td class="val-ok">16</td><td class="val-ok">10</td><td class="val-ok">9</td><td class="val-ok">5</td><td class="val-ok">9</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>87</td><td class="sticky-col">竹馬</td><td class="val-ok">218</td><td class="val-ok">34</td><td class="val-ok">30</td><td class="val-ok">17</td><td class="val-ok">29</td><td class="val-ok">34</td><td class="val-ok">11</td><td class="val-ok">6</td><td class="val-ok">7</td><td class="val-ok">44</td><td class="val-ok">14</td><td class="val-ok">5</td><td class="val-ok">18</td><td class="val-ok">6</td><td class="val-ok">7</td><td class="val-zero">0</td><td class="val-ok">26</td><td class="val-ok">4</td><td class="val-low">2</td><td class="val-low">1</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>88</td><td class="sticky-col">新店家樂福</td><td class="val-ok">129</td><td class="val-ok">54</td><td class="val-ok">57</td><td class="val-ok">38</td><td class="val-ok">41</td><td class="val-ok">37</td><td class="val-ok">24</td><td class="val-ok">21</td><td class="val-ok">7</td><td class="val-ok">17</td><td class="val-ok">8</td><td class="val-ok">8</td><td class="val-ok">22</td><td class="val-ok">13</td><td class="val-ok">14</td><td class="val-ok">7</td><td class="val-ok">10</td><td class="val-ok">10</td><td class="val-zero">0</td><td class="val-low">2</td><td class="val-ok">6</td><td class="val-ok">22</td><td class="val-ok">5</td><td class="val-ok">5</td><td class="val-ok">3</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>89</td><td class="sticky-col">澎湖三號港</td><td class="val-ok">99</td><td class="val-ok">125</td><td class="val-ok">78</td><td class="val-ok">77</td><td class="val-ok">70</td><td class="val-ok">50</td><td class="val-ok">33</td><td class="val-ok">52</td><td class="val-ok">31</td><td class="val-ok">47</td><td class="val-ok">37</td><td class="val-ok">56</td><td class="val-ok">30</td><td class="val-ok">21</td><td class="val-ok">15</td><td class="val-ok">30</td><td class="val-ok">22</td><td class="val-ok">15</td><td class="val-ok">10</td><td class="val-ok">8</td><td class="val-ok">18</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>90</td><td class="sticky-col">環球中和</td><td class="val-ok">135</td><td class="val-ok">76</td><td class="val-ok">75</td><td class="val-ok">60</td><td class="val-zero">0</td><td class="val-ok">58</td><td class="val-ok">55</td><td class="val-ok">26</td><td class="val-ok">13</td><td class="val-ok">27</td><td class="val-ok">26</td><td class="val-ok">20</td><td class="val-ok">24</td><td class="val-ok">20</td><td class="val-ok">7</td><td class="val-ok">22</td><td class="val-ok">14</td><td class="val-ok">21</td><td class="val-ok">18</td><td class="val-ok">18</td><td class="val-ok">11</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>91</td><td class="sticky-col">漢神洲際</td><td class="val-ok">172</td><td class="val-ok">109</td><td class="val-ok">91</td><td class="val-ok">78</td><td class="val-zero">0</td><td class="val-ok">68</td><td class="val-ok">49</td><td class="val-ok">35</td><td class="val-ok">21</td><td class="val-ok">27</td><td class="val-ok">31</td><td class="val-ok">28</td><td class="val-ok">29</td><td class="val-ok">20</td><td class="val-ok">19</td><td class="val-ok">21</td><td class="val-ok">11</td><td class="val-ok">24</td><td class="val-ok">20</td><td class="val-ok">20</td><td class="val-ok">13</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>92</td><td class="sticky-col">潮州車站</td><td class="val-ok">149</td><td class="val-ok">78</td><td class="val-ok">61</td><td class="val-ok">70</td><td class="val-zero">0</td><td class="val-ok">52</td><td class="val-ok">35</td><td class="val-ok">23</td><td class="val-ok">11</td><td class="val-ok">16</td><td class="val-ok">21</td><td class="val-ok">22</td><td class="val-ok">20</td><td class="val-ok">20</td><td class="val-ok">12</td><td class="val-ok">20</td><td class="val-ok">7</td><td class="val-ok">14</td><td class="val-ok">19</td><td class="val-ok">15</td><td class="val-ok">9</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>93</td><td class="sticky-col">台北微風廣場</td><td class="val-ok">136</td><td class="val-ok">67</td><td class="val-ok">51</td><td class="val-ok">59</td><td class="val-zero">0</td><td class="val-ok">47</td><td class="val-ok">28</td><td class="val-ok">17</td><td class="val-ok">6</td><td class="val-ok">10</td><td class="val-ok">18</td><td class="val-ok">15</td><td class="val-ok">16</td><td class="val-ok">17</td><td class="val-ok">11</td><td class="val-ok">14</td><td class="val-ok">7</td><td class="val-ok">17</td><td class="val-ok">19</td><td class="val-ok">14</td><td class="val-ok">8</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-low">1</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr><td>94</td><td class="sticky-col">大巨蛋SOGO</td><td class="val-ok">161</td><td class="val-ok">94</td><td class="val-ok">86</td><td class="val-ok">68</td><td class="val-zero">0</td><td class="val-ok">65</td><td class="val-ok">51</td><td class="val-ok">33</td><td class="val-ok">15</td><td class="val-ok">27</td><td class="val-ok">27</td><td class="val-ok">26</td><td class="val-ok">34</td><td class="val-ok">21</td><td class="val-ok">9</td><td class="val-ok">22</td><td class="val-ok">14</td><td class="val-ok">23</td><td class="val-ok">9</td><td class="val-ok">21</td><td class="val-ok">12</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td><td class="val-zero">0</td></tr>
+<tr class="nat-row"><td>—</td><td class="sticky-col">全國合計</td><td>10439</td><td>6037</td><td>5231</td><td>4297</td><td>3435</td><td>3396</td><td>2551</td><td>2218</td><td>2065</td><td>1977</td><td>1949</td><td>1887</td><td>1597</td><td>1451</td><td>1387</td><td>1269</td><td>1191</td><td>847</td><td>772</td><td>679</td><td>619</td><td>345</td><td>151</td><td>79</td><td>77</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+</tbody></table></div></div></div>
+
+<!-- Tab 3: National Top SKU -->
+<div id="tab-national" class="tab-content">
+<div class="section">
+  <h2>全國鏡框 Top SKU 清單 (按銷量排名)</h2>
+  <div class="filter-bar">
+    <input type="text" id="filter-sku" placeholder="搜尋品番 / 品牌..." oninput="filterTable('national-table', 1, this.value, [1,2])">
+    <select onchange="filterNatStatus(this.value)">
+      <option value="">全部</option>
+      <option value="oos">缺貨店數 > 0</option>
+      <option value="low">庫存緊張 > 0</option>
+    </select>
+  </div>
+  <div class="scroll-wrapper" style="max-height:700px;">
+  <table id="national-table">
+  <thead><tr>
+    <th>排名</th><th>品番</th><th>品牌</th><th>全台銷量</th><th>全台庫存</th>
+    <th>DOH(月)</th><th>缺貨店數</th><th>緊張店數</th><th>鋪貨店數</th>
+  </tr></thead>
+  <tbody><tr data-oos="51" data-low="14">
+  <td>1</td><td style="text-align:left">OB2020G-5A</td>
+  <td>OWNDAYS</td><td>259</td><td>213</td>
+  <td>0.8</td><td class="pct-high">51</td>
+  <td>14</td><td>83</td></tr>
+<tr data-oos="21" data-low="32">
+  <td>2</td><td style="text-align:left">OB1013G-5A</td>
+  <td>OWNDAYS</td><td>254</td><td>216</td>
+  <td>0.9</td><td class="pct-mid">21</td>
+  <td>32</td><td>83</td></tr>
+<tr data-oos="23" data-low="27">
+  <td>3</td><td style="text-align:left">AU2112A-5S</td>
+  <td>AIR Ultem</td><td>229</td><td>258</td>
+  <td>1.1</td><td class="pct-mid">23</td>
+  <td>27</td><td>89</td></tr>
+<tr data-oos="10" data-low="17">
+  <td>4</td><td style="text-align:left">SUN8006J-2S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>200</td><td>418</td>
+  <td>2.1</td><td class="pct-mid">10</td>
+  <td>17</td><td>86</td></tr>
+<tr data-oos="10" data-low="9">
+  <td>5</td><td style="text-align:left">AU2112A-5S</td>
+  <td>AIR Ultem</td><td>161</td><td>440</td>
+  <td>2.7</td><td class="pct-mid">10</td>
+  <td>9</td><td>88</td></tr>
+<tr data-oos="14" data-low="21">
+  <td>6</td><td style="text-align:left">AU2117N-4A</td>
+  <td>AIR Ultem</td><td>158</td><td>316</td>
+  <td>2.0</td><td class="pct-mid">14</td>
+  <td>21</td><td>90</td></tr>
+<tr data-oos="19" data-low="15">
+  <td>7</td><td style="text-align:left">SNP2013N-2S</td>
+  <td>OWNDAYS SNAP</td><td>147</td><td>291</td>
+  <td>2.0</td><td class="pct-mid">19</td>
+  <td>15</td><td>90</td></tr>
+<tr data-oos="21" data-low="15">
+  <td>8</td><td style="text-align:left">NC3019N-1A</td>
+  <td>NICHE Frame</td><td>146</td><td>298</td>
+  <td>2.0</td><td class="pct-mid">21</td>
+  <td>15</td><td>91</td></tr>
+<tr data-oos="47" data-low="9">
+  <td>9</td><td style="text-align:left">SNP1020X-4S</td>
+  <td>OWNDAYS SNAP</td><td>142</td><td>172</td>
+  <td>1.2</td><td class="pct-high">47</td>
+  <td>9</td><td>89</td></tr>
+<tr data-oos="32" data-low="9">
+  <td>10</td><td style="text-align:left">SNP1024N-4S</td>
+  <td>OWNDAYS SNAP</td><td>121</td><td>238</td>
+  <td>2.0</td><td class="pct-high">32</td>
+  <td>9</td><td>89</td></tr>
+<tr data-oos="16" data-low="13">
+  <td>11</td><td style="text-align:left">OB1013G-5A</td>
+  <td>OWNDAYS</td><td>120</td><td>246</td>
+  <td>2.0</td><td class="pct-mid">16</td>
+  <td>13</td><td>83</td></tr>
+<tr data-oos="43" data-low="11">
+  <td>12</td><td style="text-align:left">SNP1026X-5S</td>
+  <td>OWNDAYS SNAP</td><td>113</td><td>159</td>
+  <td>1.4</td><td class="pct-high">43</td>
+  <td>11</td><td>89</td></tr>
+<tr data-oos="15" data-low="6">
+  <td>13</td><td style="text-align:left">ECO2019K-1A</td>
+  <td>ECO2XY</td><td>112</td><td>449</td>
+  <td>4.0</td><td class="pct-mid">15</td>
+  <td>6</td><td>92</td></tr>
+<tr data-oos="29" data-low="8">
+  <td>14</td><td style="text-align:left">SNP1018N-3S</td>
+  <td>OWNDAYS SNAP</td><td>108</td><td>239</td>
+  <td>2.2</td><td class="pct-high">29</td>
+  <td>8</td><td>88</td></tr>
+<tr data-oos="12" data-low="10">
+  <td>15</td><td style="text-align:left">AU2116N-4A</td>
+  <td>AIR Ultem</td><td>98</td><td>347</td>
+  <td>3.5</td><td class="pct-mid">12</td>
+  <td>10</td><td>87</td></tr>
+<tr data-oos="44" data-low="6">
+  <td>16</td><td style="text-align:left">JD2063X-5A</td>
+  <td>John Dillinger</td><td>97</td><td>125</td>
+  <td>1.3</td><td class="pct-high">44</td>
+  <td>6</td><td>83</td></tr>
+<tr data-oos="73" data-low="2">
+  <td>16</td><td style="text-align:left">SNP1018N-3S</td>
+  <td>OWNDAYS SNAP</td><td>97</td><td>68</td>
+  <td>0.7</td><td class="pct-high">73</td>
+  <td>2</td><td>87</td></tr>
+<tr data-oos="36" data-low="7">
+  <td>18</td><td style="text-align:left">ECO2019K-1A</td>
+  <td>ECO2XY</td><td>95</td><td>163</td>
+  <td>1.7</td><td class="pct-high">36</td>
+  <td>7</td><td>89</td></tr>
+<tr data-oos="33" data-low="13">
+  <td>18</td><td style="text-align:left">AU2111A-5S</td>
+  <td>AIR Ultem</td><td>95</td><td>206</td>
+  <td>2.2</td><td class="pct-high">33</td>
+  <td>13</td><td>89</td></tr>
+<tr data-oos="70" data-low="2">
+  <td>18</td><td style="text-align:left">OB2016G-5A</td>
+  <td>OWNDAYS</td><td>95</td><td>63</td>
+  <td>0.7</td><td class="pct-high">70</td>
+  <td>2</td><td>82</td></tr>
+<tr data-oos="53" data-low="4">
+  <td>21</td><td style="text-align:left">SNP1024N-4S</td>
+  <td>OWNDAYS SNAP</td><td>94</td><td>129</td>
+  <td>1.4</td><td class="pct-high">53</td>
+  <td>4</td><td>87</td></tr>
+<tr data-oos="39" data-low="7">
+  <td>21</td><td style="text-align:left">NC3019N-1A</td>
+  <td>NICHE Frame</td><td>94</td><td>194</td>
+  <td>2.1</td><td class="pct-high">39</td>
+  <td>7</td><td>89</td></tr>
+<tr data-oos="15" data-low="6">
+  <td>23</td><td style="text-align:left">AU2112A-5S</td>
+  <td>AIR Ultem</td><td>93</td><td>331</td>
+  <td>3.6</td><td class="pct-mid">15</td>
+  <td>6</td><td>88</td></tr>
+<tr data-oos="18" data-low="8">
+  <td>24</td><td style="text-align:left">AU2118N-4A</td>
+  <td>AIR Ultem</td><td>92</td><td>278</td>
+  <td>3.0</td><td class="pct-mid">18</td>
+  <td>8</td><td>89</td></tr>
+<tr data-oos="36" data-low="3">
+  <td>25</td><td style="text-align:left">SNP1022X-4S</td>
+  <td>OWNDAYS SNAP</td><td>91</td><td>165</td>
+  <td>1.8</td><td class="pct-high">36</td>
+  <td>3</td><td>91</td></tr>
+<tr data-oos="65" data-low="1">
+  <td>26</td><td style="text-align:left">AU2125N-5S</td>
+  <td>AIR Ultem</td><td>90</td><td>86</td>
+  <td>1.0</td><td class="pct-high">65</td>
+  <td>1</td><td>84</td></tr>
+<tr data-oos="31" data-low="7">
+  <td>27</td><td style="text-align:left">SNP1025X-5S</td>
+  <td>OWNDAYS SNAP</td><td>86</td><td>225</td>
+  <td>2.6</td><td class="pct-high">31</td>
+  <td>7</td><td>89</td></tr>
+<tr data-oos="17" data-low="7">
+  <td>28</td><td style="text-align:left">SNP1021X-4S</td>
+  <td>OWNDAYS SNAP</td><td>83</td><td>251</td>
+  <td>3.0</td><td class="pct-mid">17</td>
+  <td>7</td><td>88</td></tr>
+<tr data-oos="41" data-low="7">
+  <td>29</td><td style="text-align:left">GB1047G-5S</td>
+  <td>Graph Belle</td><td>82</td><td>148</td>
+  <td>1.8</td><td class="pct-high">41</td>
+  <td>7</td><td>87</td></tr>
+<tr data-oos="16" data-low="3">
+  <td>30</td><td style="text-align:left">GB1039B-3A</td>
+  <td>Graph Belle</td><td>80</td><td>417</td>
+  <td>5.2</td><td class="pct-mid">16</td>
+  <td>3</td><td>91</td></tr>
+<tr data-oos="15" data-low="4">
+  <td>30</td><td style="text-align:left">GB1039B-3A</td>
+  <td>Graph Belle</td><td>80</td><td>349</td>
+  <td>4.4</td><td class="pct-mid">15</td>
+  <td>4</td><td>90</td></tr>
+<tr data-oos="24" data-low="7">
+  <td>32</td><td style="text-align:left">BA1030G-0S</td>
+  <td>Based</td><td>79</td><td>221</td>
+  <td>2.8</td><td class="pct-mid">24</td>
+  <td>7</td><td>85</td></tr>
+<tr data-oos="42" data-low="2">
+  <td>32</td><td style="text-align:left">OB2017G-5A</td>
+  <td>OWNDAYS</td><td>79</td><td>138</td>
+  <td>1.7</td><td class="pct-high">42</td>
+  <td>2</td><td>83</td></tr>
+<tr data-oos="59" data-low="0">
+  <td>32</td><td style="text-align:left">AU2146N-5A</td>
+  <td>AIR Ultem Classic</td><td>79</td><td>87</td>
+  <td>1.1</td><td class="pct-high">59</td>
+  <td>0</td><td>81</td></tr>
+<tr data-oos="17" data-low="9">
+  <td>35</td><td style="text-align:left">OB2010X-5A</td>
+  <td>OWNDAYS</td><td>78</td><td>267</td>
+  <td>3.4</td><td class="pct-mid">17</td>
+  <td>9</td><td>84</td></tr>
+<tr data-oos="60" data-low="3">
+  <td>36</td><td style="text-align:left">SNP2018N-4S</td>
+  <td>OWNDAYS SNAP</td><td>77</td><td>102</td>
+  <td>1.3</td><td class="pct-high">60</td>
+  <td>3</td><td>87</td></tr>
+<tr data-oos="24" data-low="8">
+  <td>37</td><td style="text-align:left">AF2009X-3A</td>
+  <td>AIR FIT</td><td>76</td><td>245</td>
+  <td>3.2</td><td class="pct-mid">24</td>
+  <td>8</td><td>89</td></tr>
+<tr data-oos="28" data-low="6">
+  <td>37</td><td style="text-align:left">JD2057N-5S</td>
+  <td>John Dillinger</td><td>76</td><td>205</td>
+  <td>2.7</td><td class="pct-mid">28</td>
+  <td>6</td><td>85</td></tr>
+<tr data-oos="40" data-low="4">
+  <td>37</td><td style="text-align:left">AU2118N-4A</td>
+  <td>AIR Ultem</td><td>76</td><td>166</td>
+  <td>2.2</td><td class="pct-high">40</td>
+  <td>4</td><td>86</td></tr>
+<tr data-oos="25" data-low="6">
+  <td>37</td><td style="text-align:left">AU2105A-4A</td>
+  <td>AIR Ultem</td><td>76</td><td>301</td>
+  <td>4.0</td><td class="pct-mid">25</td>
+  <td>6</td><td>90</td></tr>
+<tr data-oos="43" data-low="2">
+  <td>37</td><td style="text-align:left">SNP2015N-2S</td>
+  <td>OWNDAYS SNAP</td><td>76</td><td>136</td>
+  <td>1.8</td><td class="pct-high">43</td>
+  <td>2</td><td>83</td></tr>
+<tr data-oos="25" data-low="7">
+  <td>42</td><td style="text-align:left">NC3031X-4S</td>
+  <td>NICHE Frame</td><td>74</td><td>245</td>
+  <td>3.3</td><td class="pct-mid">25</td>
+  <td>7</td><td>91</td></tr>
+<tr data-oos="29" data-low="7">
+  <td>42</td><td style="text-align:left">AU2150N-5A</td>
+  <td>AIR Ultem Classic</td><td>74</td><td>149</td>
+  <td>2.0</td><td class="pct-high">29</td>
+  <td>7</td><td>83</td></tr>
+<tr data-oos="34" data-low="5">
+  <td>42</td><td style="text-align:left">SNP1026X-5S</td>
+  <td>OWNDAYS SNAP</td><td>74</td><td>189</td>
+  <td>2.6</td><td class="pct-high">34</td>
+  <td>5</td><td>88</td></tr>
+<tr data-oos="5" data-low="2">
+  <td>45</td><td style="text-align:left">OB2015G-5A</td>
+  <td>OWNDAYS</td><td>73</td><td>609</td>
+  <td>8.3</td><td class="pct-mid">5</td>
+  <td>2</td><td>81</td></tr>
+<tr data-oos="47" data-low="3">
+  <td>46</td><td style="text-align:left">SNP2018N-4S</td>
+  <td>OWNDAYS SNAP</td><td>72</td><td>161</td>
+  <td>2.2</td><td class="pct-high">47</td>
+  <td>3</td><td>91</td></tr>
+<tr data-oos="67" data-low="0">
+  <td>47</td><td style="text-align:left">OB2020G-5A</td>
+  <td>OWNDAYS</td><td>71</td><td>60</td>
+  <td>0.8</td><td class="pct-high">67</td>
+  <td>0</td><td>82</td></tr>
+<tr data-oos="44" data-low="3">
+  <td>48</td><td style="text-align:left">NC3031X-4S</td>
+  <td>NICHE Frame</td><td>70</td><td>168</td>
+  <td>2.4</td><td class="pct-high">44</td>
+  <td>3</td><td>89</td></tr>
+<tr data-oos="41" data-low="2">
+  <td>49</td><td style="text-align:left">OB1004X-4A</td>
+  <td>OWNDAYS</td><td>69</td><td>175</td>
+  <td>2.5</td><td class="pct-high">41</td>
+  <td>2</td><td>81</td></tr>
+<tr data-oos="13" data-low="4">
+  <td>49</td><td style="text-align:left">AU2117N-4A</td>
+  <td>AIR Ultem</td><td>69</td><td>352</td>
+  <td>5.1</td><td class="pct-mid">13</td>
+  <td>4</td><td>88</td></tr>
+<tr data-oos="53" data-low="6">
+  <td>51</td><td style="text-align:left">NC3035G-5A</td>
+  <td>NICHE Frame</td><td>68</td><td>99</td>
+  <td>1.5</td><td class="pct-high">53</td>
+  <td>6</td><td>83</td></tr>
+<tr data-oos="23" data-low="6">
+  <td>52</td><td style="text-align:left">AU2146N-5A</td>
+  <td>AIR Ultem Classic</td><td>67</td><td>179</td>
+  <td>2.7</td><td class="pct-mid">23</td>
+  <td>6</td><td>83</td></tr>
+<tr data-oos="65" data-low="1">
+  <td>53</td><td style="text-align:left">GB1048G-5S</td>
+  <td>Graph Belle</td><td>66</td><td>82</td>
+  <td>1.2</td><td class="pct-high">65</td>
+  <td>1</td><td>87</td></tr>
+<tr data-oos="25" data-low="4">
+  <td>54</td><td style="text-align:left">NC3019N-1A</td>
+  <td>NICHE Frame</td><td>65</td><td>239</td>
+  <td>3.7</td><td class="pct-mid">25</td>
+  <td>4</td><td>89</td></tr>
+<tr data-oos="8" data-low="4">
+  <td>55</td><td style="text-align:left">BA1030G-0S</td>
+  <td>Based</td><td>64</td><td>393</td>
+  <td>6.1</td><td class="pct-mid">8</td>
+  <td>4</td><td>83</td></tr>
+<tr data-oos="27" data-low="4">
+  <td>55</td><td style="text-align:left">SNP1025X-5S</td>
+  <td>OWNDAYS SNAP</td><td>64</td><td>178</td>
+  <td>2.8</td><td class="pct-mid">27</td>
+  <td>4</td><td>79</td></tr>
+<tr data-oos="47" data-low="4">
+  <td>57</td><td style="text-align:left">SUN8011B-3S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>63</td><td>120</td>
+  <td>1.9</td><td class="pct-high">47</td>
+  <td>4</td><td>88</td></tr>
+<tr data-oos="47" data-low="6">
+  <td>57</td><td style="text-align:left">SUN1081X-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>63</td><td>115</td>
+  <td>1.8</td><td class="pct-high">47</td>
+  <td>6</td><td>87</td></tr>
+<tr data-oos="46" data-low="3">
+  <td>59</td><td style="text-align:left">SNP1023X-4S</td>
+  <td>OWNDAYS SNAP</td><td>62</td><td>166</td>
+  <td>2.7</td><td class="pct-high">46</td>
+  <td>3</td><td>88</td></tr>
+<tr data-oos="33" data-low="5">
+  <td>60</td><td style="text-align:left">AF2009X-3A</td>
+  <td>AIR FIT</td><td>61</td><td>181</td>
+  <td>3.0</td><td class="pct-high">33</td>
+  <td>5</td><td>87</td></tr>
+<tr data-oos="20" data-low="5">
+  <td>60</td><td style="text-align:left">SNP1024N-4S</td>
+  <td>OWNDAYS SNAP</td><td>61</td><td>242</td>
+  <td>4.0</td><td class="pct-mid">20</td>
+  <td>5</td><td>91</td></tr>
+<tr data-oos="59" data-low="2">
+  <td>62</td><td style="text-align:left">SNP1020X-4S</td>
+  <td>OWNDAYS SNAP</td><td>60</td><td>100</td>
+  <td>1.7</td><td class="pct-high">59</td>
+  <td>2</td><td>85</td></tr>
+<tr data-oos="42" data-low="3">
+  <td>62</td><td style="text-align:left">SUN2115N-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>60</td><td>135</td>
+  <td>2.2</td><td class="pct-high">42</td>
+  <td>3</td><td>88</td></tr>
+<tr data-oos="47" data-low="2">
+  <td>64</td><td style="text-align:left">NC3035G-5A</td>
+  <td>NICHE Frame</td><td>59</td><td>106</td>
+  <td>1.8</td><td class="pct-high">47</td>
+  <td>2</td><td>83</td></tr>
+<tr data-oos="17" data-low="3">
+  <td>64</td><td style="text-align:left">NC3030X-4S</td>
+  <td>NICHE Frame</td><td>59</td><td>331</td>
+  <td>5.6</td><td class="pct-mid">17</td>
+  <td>3</td><td>90</td></tr>
+<tr data-oos="50" data-low="4">
+  <td>66</td><td style="text-align:left">OB1004X-4A</td>
+  <td>OWNDAYS</td><td>58</td><td>87</td>
+  <td>1.5</td><td class="pct-high">50</td>
+  <td>4</td><td>81</td></tr>
+<tr data-oos="60" data-low="1">
+  <td>66</td><td style="text-align:left">SNP1026X-5S</td>
+  <td>OWNDAYS SNAP</td><td>58</td><td>113</td>
+  <td>1.9</td><td class="pct-high">60</td>
+  <td>1</td><td>87</td></tr>
+<tr data-oos="33" data-low="1">
+  <td>66</td><td style="text-align:left">AU2115N-4A</td>
+  <td>AIR Ultem</td><td>58</td><td>169</td>
+  <td>2.9</td><td class="pct-high">33</td>
+  <td>1</td><td>86</td></tr>
+<tr data-oos="16" data-low="4">
+  <td>66</td><td style="text-align:left">NC3026C-3A</td>
+  <td>NICHE Frame</td><td>58</td><td>385</td>
+  <td>6.6</td><td class="pct-mid">16</td>
+  <td>4</td><td>91</td></tr>
+<tr data-oos="26" data-low="7">
+  <td>66</td><td style="text-align:left">LB1016G-3S</td>
+  <td>lillybell</td><td>58</td><td>217</td>
+  <td>3.7</td><td class="pct-mid">26</td>
+  <td>7</td><td>89</td></tr>
+<tr data-oos="72" data-low="1">
+  <td>66</td><td style="text-align:left">NC3020N-1A</td>
+  <td>NICHE Frame</td><td>58</td><td>67</td>
+  <td>1.2</td><td class="pct-high">72</td>
+  <td>1</td><td>87</td></tr>
+<tr data-oos="43" data-low="1">
+  <td>72</td><td style="text-align:left">AU2146N-5A</td>
+  <td>AIR Ultem Classic</td><td>57</td><td>116</td>
+  <td>2.0</td><td class="pct-high">43</td>
+  <td>1</td><td>83</td></tr>
+<tr data-oos="12" data-low="3">
+  <td>72</td><td style="text-align:left">NC3026C-3A</td>
+  <td>NICHE Frame</td><td>57</td><td>461</td>
+  <td>8.1</td><td class="pct-mid">12</td>
+  <td>3</td><td>90</td></tr>
+<tr data-oos="12" data-low="5">
+  <td>72</td><td style="text-align:left">JD2045J-1A</td>
+  <td>John Dillinger</td><td>57</td><td>369</td>
+  <td>6.5</td><td class="pct-mid">12</td>
+  <td>5</td><td>92</td></tr>
+<tr data-oos="28" data-low="8">
+  <td>75</td><td style="text-align:left">GB1047G-5S</td>
+  <td>Graph Belle</td><td>56</td><td>127</td>
+  <td>2.3</td><td class="pct-mid">28</td>
+  <td>8</td><td>78</td></tr>
+<tr data-oos="49" data-low="0">
+  <td>76</td><td style="text-align:left">OB2017G-5A</td>
+  <td>OWNDAYS</td><td>55</td><td>120</td>
+  <td>2.2</td><td class="pct-high">49</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="28" data-low="3">
+  <td>76</td><td style="text-align:left">NC3016J-0S</td>
+  <td>NICHE Frame</td><td>55</td><td>307</td>
+  <td>5.6</td><td class="pct-mid">28</td>
+  <td>3</td><td>92</td></tr>
+<tr data-oos="69" data-low="0">
+  <td>76</td><td style="text-align:left">GB1047G-5S</td>
+  <td>Graph Belle</td><td>55</td><td>81</td>
+  <td>1.5</td><td class="pct-high">69</td>
+  <td>0</td><td>86</td></tr>
+<tr data-oos="14" data-low="4">
+  <td>76</td><td style="text-align:left">LB1017G-4S</td>
+  <td>lillybell</td><td>55</td><td>261</td>
+  <td>4.7</td><td class="pct-mid">14</td>
+  <td>4</td><td>87</td></tr>
+<tr data-oos="49" data-low="0">
+  <td>76</td><td style="text-align:left">AU2150N-5A</td>
+  <td>AIR Ultem Classic</td><td>55</td><td>104</td>
+  <td>1.9</td><td class="pct-high">49</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="11" data-low="0">
+  <td>81</td><td style="text-align:left">NC3027C-3A</td>
+  <td>NICHE Frame</td><td>54</td><td>467</td>
+  <td>8.6</td><td class="pct-mid">11</td>
+  <td>0</td><td>91</td></tr>
+<tr data-oos="24" data-low="6">
+  <td>81</td><td style="text-align:left">SUN8017F-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>54</td><td>233</td>
+  <td>4.3</td><td class="pct-mid">24</td>
+  <td>6</td><td>84</td></tr>
+<tr data-oos="20" data-low="2">
+  <td>83</td><td style="text-align:left">SUN7008X-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>53</td><td>303</td>
+  <td>5.7</td><td class="pct-mid">20</td>
+  <td>2</td><td>89</td></tr>
+<tr data-oos="38" data-low="1">
+  <td>83</td><td style="text-align:left">OB2008X-5A</td>
+  <td>OWNDAYS</td><td>53</td><td>132</td>
+  <td>2.5</td><td class="pct-high">38</td>
+  <td>1</td><td>81</td></tr>
+<tr data-oos="28" data-low="5">
+  <td>83</td><td style="text-align:left">SNP2013N-2S</td>
+  <td>OWNDAYS SNAP</td><td>53</td><td>233</td>
+  <td>4.4</td><td class="pct-mid">28</td>
+  <td>5</td><td>91</td></tr>
+<tr data-oos="11" data-low="3">
+  <td>86</td><td style="text-align:left">NC3027C-3A</td>
+  <td>NICHE Frame</td><td>52</td><td>439</td>
+  <td>8.4</td><td class="pct-mid">11</td>
+  <td>3</td><td>91</td></tr>
+<tr data-oos="23" data-low="3">
+  <td>87</td><td style="text-align:left">AF2009X-3A</td>
+  <td>AIR FIT</td><td>51</td><td>221</td>
+  <td>4.3</td><td class="pct-mid">23</td>
+  <td>3</td><td>88</td></tr>
+<tr data-oos="46" data-low="4">
+  <td>87</td><td style="text-align:left">GB1048G-5S</td>
+  <td>Graph Belle</td><td>51</td><td>126</td>
+  <td>2.5</td><td class="pct-high">46</td>
+  <td>4</td><td>87</td></tr>
+<tr data-oos="18" data-low="3">
+  <td>87</td><td style="text-align:left">JD2043J-1A</td>
+  <td>John Dillinger</td><td>51</td><td>341</td>
+  <td>6.7</td><td class="pct-mid">18</td>
+  <td>3</td><td>92</td></tr>
+<tr data-oos="53" data-low="2">
+  <td>90</td><td style="text-align:left">MV2005N-5S</td>
+  <td>AIR For Men</td><td>50</td><td>102</td>
+  <td>2.0</td><td class="pct-high">53</td>
+  <td>2</td><td>85</td></tr>
+<tr data-oos="16" data-low="1">
+  <td>90</td><td style="text-align:left">GB1040B-3A</td>
+  <td>Graph Belle</td><td>50</td><td>318</td>
+  <td>6.4</td><td class="pct-mid">16</td>
+  <td>1</td><td>90</td></tr>
+<tr data-oos="16" data-low="2">
+  <td>90</td><td style="text-align:left">AF2012N-4S</td>
+  <td>AIR FIT</td><td>50</td><td>292</td>
+  <td>5.8</td><td class="pct-mid">16</td>
+  <td>2</td><td>89</td></tr>
+<tr data-oos="56" data-low="2">
+  <td>90</td><td style="text-align:left">JD2063X-5A</td>
+  <td>John Dillinger</td><td>50</td><td>92</td>
+  <td>1.8</td><td class="pct-high">56</td>
+  <td>2</td><td>83</td></tr>
+<tr data-oos="65" data-low="0">
+  <td>90</td><td style="text-align:left">AU2146N-5A</td>
+  <td>AIR Ultem Classic</td><td>50</td><td>53</td>
+  <td>1.1</td><td class="pct-high">65</td>
+  <td>0</td><td>76</td></tr>
+<tr data-oos="55" data-low="1">
+  <td>95</td><td style="text-align:left">OB1005X-4A</td>
+  <td>OWNDAYS</td><td>48</td><td>88</td>
+  <td>1.8</td><td class="pct-high">55</td>
+  <td>1</td><td>82</td></tr>
+<tr data-oos="11" data-low="3">
+  <td>95</td><td style="text-align:left">GB1040B-3A</td>
+  <td>Graph Belle</td><td>48</td><td>394</td>
+  <td>8.2</td><td class="pct-mid">11</td>
+  <td>3</td><td>89</td></tr>
+<tr data-oos="21" data-low="3">
+  <td>95</td><td style="text-align:left">AU2116N-4A</td>
+  <td>AIR Ultem</td><td>48</td><td>205</td>
+  <td>4.3</td><td class="pct-mid">21</td>
+  <td>3</td><td>84</td></tr>
+<tr data-oos="30" data-low="3">
+  <td>95</td><td style="text-align:left">AU2115N-4A</td>
+  <td>AIR Ultem</td><td>48</td><td>171</td>
+  <td>3.6</td><td class="pct-high">30</td>
+  <td>3</td><td>86</td></tr>
+<tr data-oos="79" data-low="0">
+  <td>99</td><td style="text-align:left">OB1005X-4A</td>
+  <td>OWNDAYS</td><td>47</td><td>40</td>
+  <td>0.9</td><td class="pct-high">79</td>
+  <td>0</td><td>82</td></tr>
+<tr data-oos="61" data-low="0">
+  <td>99</td><td style="text-align:left">GB1048G-5S</td>
+  <td>Graph Belle</td><td>47</td><td>91</td>
+  <td>1.9</td><td class="pct-high">61</td>
+  <td>0</td><td>85</td></tr>
+<tr data-oos="72" data-low="2">
+  <td>99</td><td style="text-align:left">SNP1022X-4S</td>
+  <td>OWNDAYS SNAP</td><td>47</td><td>86</td>
+  <td>1.8</td><td class="pct-high">72</td>
+  <td>2</td><td>88</td></tr>
+<tr data-oos="26" data-low="2">
+  <td>99</td><td style="text-align:left">SNP1018N-3S</td>
+  <td>OWNDAYS SNAP</td><td>47</td><td>228</td>
+  <td>4.9</td><td class="pct-mid">26</td>
+  <td>2</td><td>87</td></tr>
+<tr data-oos="83" data-low="0">
+  <td>103</td><td style="text-align:left">SNP2018N-4S</td>
+  <td>OWNDAYS SNAP</td><td>46</td><td>51</td>
+  <td>1.1</td><td class="pct-high">83</td>
+  <td>0</td><td>87</td></tr>
+<tr data-oos="59" data-low="1">
+  <td>103</td><td style="text-align:left">AU2117N-4A</td>
+  <td>AIR Ultem</td><td>46</td><td>93</td>
+  <td>2.0</td><td class="pct-high">59</td>
+  <td>1</td><td>85</td></tr>
+<tr data-oos="46" data-low="0">
+  <td>103</td><td style="text-align:left">JD2065X-5A</td>
+  <td>John Dillinger</td><td>46</td><td>108</td>
+  <td>2.3</td><td class="pct-high">46</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="35" data-low="3">
+  <td>103</td><td style="text-align:left">AU2127N-5S</td>
+  <td>AIR Ultem</td><td>46</td><td>177</td>
+  <td>3.8</td><td class="pct-high">35</td>
+  <td>3</td><td>87</td></tr>
+<tr data-oos="34" data-low="2">
+  <td>103</td><td style="text-align:left">AU2116N-4A</td>
+  <td>AIR Ultem</td><td>46</td><td>168</td>
+  <td>3.7</td><td class="pct-high">34</td>
+  <td>2</td><td>87</td></tr>
+<tr data-oos="29" data-low="1">
+  <td>103</td><td style="text-align:left">AU2116N-4A</td>
+  <td>AIR Ultem</td><td>46</td><td>161</td>
+  <td>3.5</td><td class="pct-high">29</td>
+  <td>1</td><td>86</td></tr>
+<tr data-oos="55" data-low="0">
+  <td>103</td><td style="text-align:left">AU2125N-5S</td>
+  <td>AIR Ultem</td><td>46</td><td>85</td>
+  <td>1.8</td><td class="pct-high">55</td>
+  <td>0</td><td>79</td></tr>
+<tr data-oos="45" data-low="2">
+  <td>110</td><td style="text-align:left">OB1005X-4A</td>
+  <td>OWNDAYS</td><td>45</td><td>122</td>
+  <td>2.7</td><td class="pct-high">45</td>
+  <td>2</td><td>83</td></tr>
+<tr data-oos="53" data-low="2">
+  <td>110</td><td style="text-align:left">GB1048G-5S</td>
+  <td>Graph Belle</td><td>45</td><td>111</td>
+  <td>2.5</td><td class="pct-high">53</td>
+  <td>2</td><td>87</td></tr>
+<tr data-oos="33" data-low="2">
+  <td>110</td><td style="text-align:left">OB2010X-5A</td>
+  <td>OWNDAYS</td><td>45</td><td>184</td>
+  <td>4.1</td><td class="pct-high">33</td>
+  <td>2</td><td>84</td></tr>
+<tr data-oos="57" data-low="1">
+  <td>110</td><td style="text-align:left">NC3031X-4S</td>
+  <td>NICHE Frame</td><td>45</td><td>103</td>
+  <td>2.3</td><td class="pct-high">57</td>
+  <td>1</td><td>88</td></tr>
+<tr data-oos="17" data-low="2">
+  <td>110</td><td style="text-align:left">NC3026C-3A</td>
+  <td>NICHE Frame</td><td>45</td><td>313</td>
+  <td>7.0</td><td class="pct-mid">17</td>
+  <td>2</td><td>91</td></tr>
+<tr data-oos="48" data-low="1">
+  <td>115</td><td style="text-align:left">GB1045G-5S</td>
+  <td>Graph Belle</td><td>44</td><td>106</td>
+  <td>2.4</td><td class="pct-high">48</td>
+  <td>1</td><td>83</td></tr>
+<tr data-oos="27" data-low="2">
+  <td>115</td><td style="text-align:left">OB1016G-5A</td>
+  <td>OWNDAYS</td><td>44</td><td>199</td>
+  <td>4.5</td><td class="pct-mid">27</td>
+  <td>2</td><td>84</td></tr>
+<tr data-oos="34" data-low="1">
+  <td>115</td><td style="text-align:left">SUN7010B-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>44</td><td>205</td>
+  <td>4.7</td><td class="pct-high">34</td>
+  <td>1</td><td>88</td></tr>
+<tr data-oos="76" data-low="0">
+  <td>115</td><td style="text-align:left">AU2111A-5S</td>
+  <td>AIR Ultem</td><td>44</td><td>44</td>
+  <td>1.0</td><td class="pct-high">76</td>
+  <td>0</td><td>86</td></tr>
+<tr data-oos="20" data-low="2">
+  <td>119</td><td style="text-align:left">OR2005-N</td>
+  <td>OWNDAYS Plastic</td><td>43</td><td>390</td>
+  <td>9.1</td><td class="pct-mid">20</td>
+  <td>2</td><td>88</td></tr>
+<tr data-oos="34" data-low="2">
+  <td>119</td><td style="text-align:left">OB1003X-4A</td>
+  <td>OWNDAYS</td><td>43</td><td>151</td>
+  <td>3.5</td><td class="pct-high">34</td>
+  <td>2</td><td>81</td></tr>
+<tr data-oos="10" data-low="1">
+  <td>119</td><td style="text-align:left">GB1039B-3A</td>
+  <td>Graph Belle</td><td>43</td><td>532</td>
+  <td>12.4</td><td class="pct-mid">10</td>
+  <td>1</td><td>91</td></tr>
+<tr data-oos="67" data-low="1">
+  <td>119</td><td style="text-align:left">AU2101E-3A</td>
+  <td>AIR Ultem</td><td>43</td><td>68</td>
+  <td>1.6</td><td class="pct-high">67</td>
+  <td>1</td><td>85</td></tr>
+<tr data-oos="68" data-low="0">
+  <td>123</td><td style="text-align:left">NC3037G-5A</td>
+  <td>NICHE Frame</td><td>42</td><td>72</td>
+  <td>1.7</td><td class="pct-high">68</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="52" data-low="2">
+  <td>123</td><td style="text-align:left">AF2009X-3A</td>
+  <td>AIR FIT</td><td>42</td><td>108</td>
+  <td>2.6</td><td class="pct-high">52</td>
+  <td>2</td><td>85</td></tr>
+<tr data-oos="22" data-low="1">
+  <td>123</td><td style="text-align:left">GB1040B-3A</td>
+  <td>Graph Belle</td><td>42</td><td>248</td>
+  <td>5.9</td><td class="pct-mid">22</td>
+  <td>1</td><td>89</td></tr>
+<tr data-oos="45" data-low="1">
+  <td>126</td><td style="text-align:left">AU2115N-4A</td>
+  <td>AIR Ultem</td><td>41</td><td>127</td>
+  <td>3.1</td><td class="pct-high">45</td>
+  <td>1</td><td>87</td></tr>
+<tr data-oos="41" data-low="1">
+  <td>126</td><td style="text-align:left">OR2027N-8A</td>
+  <td>OWNDAYS Plastic</td><td>41</td><td>190</td>
+  <td>4.6</td><td class="pct-high">41</td>
+  <td>1</td><td>84</td></tr>
+<tr data-oos="44" data-low="1">
+  <td>128</td><td style="text-align:left">OB1003X-4A</td>
+  <td>OWNDAYS</td><td>40</td><td>126</td>
+  <td>3.1</td><td class="pct-high">44</td>
+  <td>1</td><td>84</td></tr>
+<tr data-oos="51" data-low="0">
+  <td>128</td><td style="text-align:left">SUN2117N-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>40</td><td>101</td>
+  <td>2.5</td><td class="pct-high">51</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="16" data-low="4">
+  <td>128</td><td style="text-align:left">SNP1023X-4S</td>
+  <td>OWNDAYS SNAP</td><td>40</td><td>255</td>
+  <td>6.4</td><td class="pct-mid">16</td>
+  <td>4</td><td>91</td></tr>
+<tr data-oos="47" data-low="1">
+  <td>128</td><td style="text-align:left">AU2117N-4A</td>
+  <td>AIR Ultem</td><td>40</td><td>106</td>
+  <td>2.6</td><td class="pct-high">47</td>
+  <td>1</td><td>82</td></tr>
+<tr data-oos="40" data-low="0">
+  <td>128</td><td style="text-align:left">AU2115N-4A</td>
+  <td>AIR Ultem</td><td>40</td><td>120</td>
+  <td>3.0</td><td class="pct-high">40</td>
+  <td>0</td><td>85</td></tr>
+<tr data-oos="46" data-low="2">
+  <td>133</td><td style="text-align:left">OB2019G-5A</td>
+  <td>OWNDAYS</td><td>39</td><td>105</td>
+  <td>2.7</td><td class="pct-high">46</td>
+  <td>2</td><td>83</td></tr>
+<tr data-oos="19" data-low="2">
+  <td>133</td><td style="text-align:left">GB2041C-4S</td>
+  <td>Graph Belle</td><td>39</td><td>325</td>
+  <td>8.3</td><td class="pct-mid">19</td>
+  <td>2</td><td>91</td></tr>
+<tr data-oos="84" data-low="0">
+  <td>133</td><td style="text-align:left">SNP1020X-4S</td>
+  <td>OWNDAYS SNAP</td><td>39</td><td>17</td>
+  <td>0.4</td><td class="pct-high">84</td>
+  <td>0</td><td>85</td></tr>
+<tr data-oos="46" data-low="0">
+  <td>133</td><td style="text-align:left">AU2147N-5A</td>
+  <td>AIR Ultem Classic</td><td>39</td><td>98</td>
+  <td>2.5</td><td class="pct-high">46</td>
+  <td>0</td><td>84</td></tr>
+<tr data-oos="19" data-low="0">
+  <td>137</td><td style="text-align:left">AU2119N-4A</td>
+  <td>AIR Ultem</td><td>38</td><td>332</td>
+  <td>8.7</td><td class="pct-mid">19</td>
+  <td>0</td><td>90</td></tr>
+<tr data-oos="52" data-low="0">
+  <td>137</td><td style="text-align:left">MV2001N-5S</td>
+  <td>AIR For Men</td><td>38</td><td>84</td>
+  <td>2.2</td><td class="pct-high">52</td>
+  <td>0</td><td>72</td></tr>
+<tr data-oos="28" data-low="2">
+  <td>137</td><td style="text-align:left">SUN1081X-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>38</td><td>174</td>
+  <td>4.6</td><td class="pct-mid">28</td>
+  <td>2</td><td>79</td></tr>
+<tr data-oos="37" data-low="0">
+  <td>137</td><td style="text-align:left">SUN8018F-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>38</td><td>187</td>
+  <td>4.9</td><td class="pct-high">37</td>
+  <td>0</td><td>86</td></tr>
+<tr data-oos="35" data-low="6">
+  <td>137</td><td style="text-align:left">SUN8019F-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>38</td><td>168</td>
+  <td>4.4</td><td class="pct-high">35</td>
+  <td>6</td><td>85</td></tr>
+<tr data-oos="46" data-low="1">
+  <td>137</td><td style="text-align:left">JD2063X-5A</td>
+  <td>John Dillinger</td><td>38</td><td>105</td>
+  <td>2.8</td><td class="pct-high">46</td>
+  <td>1</td><td>83</td></tr>
+<tr data-oos="53" data-low="1">
+  <td>137</td><td style="text-align:left">JD2054N-4S</td>
+  <td>John Dillinger</td><td>38</td><td>115</td>
+  <td>3.0</td><td class="pct-high">53</td>
+  <td>1</td><td>87</td></tr>
+<tr data-oos="48" data-low="3">
+  <td>137</td><td style="text-align:left">AU2101E-3A</td>
+  <td>AIR Ultem</td><td>38</td><td>113</td>
+  <td>3.0</td><td class="pct-high">48</td>
+  <td>3</td><td>82</td></tr>
+<tr data-oos="34" data-low="3">
+  <td>137</td><td style="text-align:left">JD2065X-5A</td>
+  <td>John Dillinger</td><td>38</td><td>122</td>
+  <td>3.2</td><td class="pct-high">34</td>
+  <td>3</td><td>83</td></tr>
+<tr data-oos="22" data-low="3">
+  <td>146</td><td style="text-align:left">AU2112A-5S</td>
+  <td>AIR Ultem</td><td>37</td><td>224</td>
+  <td>6.1</td><td class="pct-mid">22</td>
+  <td>3</td><td>88</td></tr>
+<tr data-oos="34" data-low="5">
+  <td>146</td><td style="text-align:left">AF1037G-5S</td>
+  <td>AIR FIT</td><td>37</td><td>109</td>
+  <td>2.9</td><td class="pct-high">34</td>
+  <td>5</td><td>72</td></tr>
+<tr data-oos="47" data-low="1">
+  <td>146</td><td style="text-align:left">SUN7007X-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>37</td><td>99</td>
+  <td>2.7</td><td class="pct-high">47</td>
+  <td>1</td><td>81</td></tr>
+<tr data-oos="30" data-low="1">
+  <td>146</td><td style="text-align:left">SNP2013N-2S</td>
+  <td>OWNDAYS SNAP</td><td>37</td><td>200</td>
+  <td>5.4</td><td class="pct-high">30</td>
+  <td>1</td><td>88</td></tr>
+<tr data-oos="30" data-low="0">
+  <td>150</td><td style="text-align:left">OR1061X-5S</td>
+  <td>OWNDAYS Metal</td><td>36</td><td>172</td>
+  <td>4.8</td><td class="pct-high">30</td>
+  <td>0</td><td>89</td></tr>
+<tr data-oos="61" data-low="0">
+  <td>150</td><td style="text-align:left">NC3036G-5A</td>
+  <td>NICHE Frame</td><td>36</td><td>88</td>
+  <td>2.4</td><td class="pct-high">61</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="25" data-low="3">
+  <td>150</td><td style="text-align:left">OB1003X-4A</td>
+  <td>OWNDAYS</td><td>36</td><td>199</td>
+  <td>5.5</td><td class="pct-mid">25</td>
+  <td>3</td><td>84</td></tr>
+<tr data-oos="35" data-low="3">
+  <td>150</td><td style="text-align:left">OR2079E-4S</td>
+  <td>OWNDAYS Plastic</td><td>36</td><td>149</td>
+  <td>4.1</td><td class="pct-high">35</td>
+  <td>3</td><td>85</td></tr>
+<tr data-oos="59" data-low="0">
+  <td>150</td><td style="text-align:left">NC3009K-0S</td>
+  <td>NICHE Frame</td><td>36</td><td>80</td>
+  <td>2.2</td><td class="pct-high">59</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="25" data-low="2">
+  <td>150</td><td style="text-align:left">SUN7007X-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>36</td><td>185</td>
+  <td>5.1</td><td class="pct-mid">25</td>
+  <td>2</td><td>88</td></tr>
+<tr data-oos="17" data-low="3">
+  <td>150</td><td style="text-align:left">NC3027C-3A</td>
+  <td>NICHE Frame</td><td>36</td><td>287</td>
+  <td>8.0</td><td class="pct-mid">17</td>
+  <td>3</td><td>91</td></tr>
+<tr data-oos="64" data-low="0">
+  <td>150</td><td style="text-align:left">JD1051X-5A</td>
+  <td>John Dillinger</td><td>36</td><td>83</td>
+  <td>2.3</td><td class="pct-high">64</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="26" data-low="3">
+  <td>150</td><td style="text-align:left">OB1007X-5A</td>
+  <td>OWNDAYS</td><td>36</td><td>156</td>
+  <td>4.3</td><td class="pct-mid">26</td>
+  <td>3</td><td>80</td></tr>
+<tr data-oos="45" data-low="3">
+  <td>150</td><td style="text-align:left">NC3020N-1A</td>
+  <td>NICHE Frame</td><td>36</td><td>131</td>
+  <td>3.6</td><td class="pct-high">45</td>
+  <td>3</td><td>87</td></tr>
+<tr data-oos="24" data-low="3">
+  <td>150</td><td style="text-align:left">NC3031X-4S</td>
+  <td>NICHE Frame</td><td>36</td><td>179</td>
+  <td>5.0</td><td class="pct-mid">24</td>
+  <td>3</td><td>91</td></tr>
+<tr data-oos="44" data-low="0">
+  <td>150</td><td style="text-align:left">OR1056X-4A</td>
+  <td>OWNDAYS Metal</td><td>36</td><td>105</td>
+  <td>2.9</td><td class="pct-high">44</td>
+  <td>0</td><td>81</td></tr>
+<tr data-oos="62" data-low="0">
+  <td>150</td><td style="text-align:left">AF1036G-5S</td>
+  <td>AIR FIT</td><td>36</td><td>72</td>
+  <td>2.0</td><td class="pct-high">62</td>
+  <td>0</td><td>80</td></tr>
+<tr data-oos="75" data-low="1">
+  <td>163</td><td style="text-align:left">SNP2012N-2S</td>
+  <td>OWNDAYS SNAP</td><td>35</td><td>66</td>
+  <td>1.9</td><td class="pct-high">75</td>
+  <td>1</td><td>85</td></tr>
+<tr data-oos="62" data-low="0">
+  <td>163</td><td style="text-align:left">NC3035G-5A</td>
+  <td>NICHE Frame</td><td>35</td><td>86</td>
+  <td>2.5</td><td class="pct-high">62</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="23" data-low="3">
+  <td>163</td><td style="text-align:left">OR2027N-8A</td>
+  <td>OWNDAYS Plastic</td><td>35</td><td>195</td>
+  <td>5.6</td><td class="pct-mid">23</td>
+  <td>3</td><td>80</td></tr>
+<tr data-oos="62" data-low="2">
+  <td>163</td><td style="text-align:left">SUN8018F-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>35</td><td>79</td>
+  <td>2.3</td><td class="pct-high">62</td>
+  <td>2</td><td>82</td></tr>
+<tr data-oos="56" data-low="1">
+  <td>163</td><td style="text-align:left">GB1045G-5S</td>
+  <td>Graph Belle</td><td>35</td><td>96</td>
+  <td>2.7</td><td class="pct-high">56</td>
+  <td>1</td><td>87</td></tr>
+<tr data-oos="35" data-low="0">
+  <td>163</td><td style="text-align:left">AU2124N-5S</td>
+  <td>AIR Ultem</td><td>35</td><td>83</td>
+  <td>2.4</td><td class="pct-high">35</td>
+  <td>0</td><td>62</td></tr>
+<tr data-oos="29" data-low="2">
+  <td>163</td><td style="text-align:left">OB1016G-5A</td>
+  <td>OWNDAYS</td><td>35</td><td>185</td>
+  <td>5.3</td><td class="pct-high">29</td>
+  <td>2</td><td>84</td></tr>
+<tr data-oos="82" data-low="0">
+  <td>163</td><td style="text-align:left">SNP1011N-1S</td>
+  <td>OWNDAYS SNAP</td><td>35</td><td>71</td>
+  <td>2.0</td><td class="pct-high">82</td>
+  <td>0</td><td>89</td></tr>
+<tr data-oos="23" data-low="2">
+  <td>163</td><td style="text-align:left">LB1011G-0S</td>
+  <td>lillybell</td><td>35</td><td>192</td>
+  <td>5.5</td><td class="pct-mid">23</td>
+  <td>2</td><td>85</td></tr>
+<tr data-oos="51" data-low="1">
+  <td>163</td><td style="text-align:left">AU2124N-5S</td>
+  <td>AIR Ultem</td><td>35</td><td>43</td>
+  <td>1.2</td><td class="pct-high">51</td>
+  <td>1</td><td>63</td></tr>
+<tr data-oos="21" data-low="0">
+  <td>163</td><td style="text-align:left">ST2002X-5A</td>
+  <td>collaboration</td><td>35</td><td>33</td>
+  <td>0.9</td><td class="pct-mid">21</td>
+  <td>0</td><td>30</td></tr>
+<tr data-oos="43" data-low="1">
+  <td>163</td><td style="text-align:left">GB1047G-5S</td>
+  <td>Graph Belle</td><td>35</td><td>86</td>
+  <td>2.5</td><td class="pct-high">43</td>
+  <td>1</td><td>68</td></tr>
+<tr data-oos="59" data-low="0">
+  <td>163</td><td style="text-align:left">AU2147N-5A</td>
+  <td>AIR Ultem Classic</td><td>35</td><td>71</td>
+  <td>2.0</td><td class="pct-high">59</td>
+  <td>0</td><td>79</td></tr>
+<tr data-oos="34" data-low="3">
+  <td>176</td><td style="text-align:left">GB1039B-3A</td>
+  <td>Graph Belle</td><td>34</td><td>170</td>
+  <td>5.0</td><td class="pct-high">34</td>
+  <td>3</td><td>88</td></tr>
+<tr data-oos="23" data-low="1">
+  <td>176</td><td style="text-align:left">AU2108A-4A</td>
+  <td>AIR Ultem</td><td>34</td><td>235</td>
+  <td>6.9</td><td class="pct-mid">23</td>
+  <td>1</td><td>88</td></tr>
+<tr data-oos="35" data-low="2">
+  <td>176</td><td style="text-align:left">SUN1081X-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>34</td><td>171</td>
+  <td>5.0</td><td class="pct-high">35</td>
+  <td>2</td><td>84</td></tr>
+<tr data-oos="22" data-low="0">
+  <td>176</td><td style="text-align:left">SUN1079G-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>34</td><td>239</td>
+  <td>7.0</td><td class="pct-mid">22</td>
+  <td>0</td><td>87</td></tr>
+<tr data-oos="32" data-low="2">
+  <td>176</td><td style="text-align:left">OR2084L-4S</td>
+  <td>OWNDAYS+</td><td>34</td><td>270</td>
+  <td>7.9</td><td class="pct-high">32</td>
+  <td>2</td><td>81</td></tr>
+<tr data-oos="26" data-low="1">
+  <td>176</td><td style="text-align:left">SUN2115N-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>34</td><td>165</td>
+  <td>4.9</td><td class="pct-mid">26</td>
+  <td>1</td><td>88</td></tr>
+<tr data-oos="47" data-low="1">
+  <td>182</td><td style="text-align:left">BA1033G-2S</td>
+  <td>Based</td><td>33</td><td>116</td>
+  <td>3.5</td><td class="pct-high">47</td>
+  <td>1</td><td>81</td></tr>
+<tr data-oos="37" data-low="0">
+  <td>182</td><td style="text-align:left">MV2005N-5S</td>
+  <td>AIR For Men</td><td>33</td><td>102</td>
+  <td>3.1</td><td class="pct-high">37</td>
+  <td>0</td><td>74</td></tr>
+<tr data-oos="37" data-low="2">
+  <td>182</td><td style="text-align:left">SUN8006J-2S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>33</td><td>151</td>
+  <td>4.6</td><td class="pct-high">37</td>
+  <td>2</td><td>86</td></tr>
+<tr data-oos="49" data-low="1">
+  <td>182</td><td style="text-align:left">JD7001B-4S</td>
+  <td>John Dillinger</td><td>33</td><td>60</td>
+  <td>1.8</td><td class="pct-high">49</td>
+  <td>1</td><td>66</td></tr>
+<tr data-oos="47" data-low="1">
+  <td>182</td><td style="text-align:left">GB1045G-5S</td>
+  <td>Graph Belle</td><td>33</td><td>114</td>
+  <td>3.5</td><td class="pct-high">47</td>
+  <td>1</td><td>87</td></tr>
+<tr data-oos="18" data-low="1">
+  <td>182</td><td style="text-align:left">AU2150N-5A</td>
+  <td>AIR Ultem Classic</td><td>33</td><td>162</td>
+  <td>4.9</td><td class="pct-mid">18</td>
+  <td>1</td><td>84</td></tr>
+<tr data-oos="32" data-low="4">
+  <td>182</td><td style="text-align:left">OR2027N-8A</td>
+  <td>OWNDAYS Plastic</td><td>33</td><td>181</td>
+  <td>5.5</td><td class="pct-high">32</td>
+  <td>4</td><td>82</td></tr>
+<tr data-oos="75" data-low="0">
+  <td>189</td><td style="text-align:left">OB1015G-5A</td>
+  <td>OWNDAYS</td><td>32</td><td>43</td>
+  <td>1.3</td><td class="pct-high">75</td>
+  <td>0</td><td>82</td></tr>
+<tr data-oos="48" data-low="2">
+  <td>189</td><td style="text-align:left">JD2063X-5A</td>
+  <td>John Dillinger</td><td>32</td><td>101</td>
+  <td>3.2</td><td class="pct-high">48</td>
+  <td>2</td><td>83</td></tr>
+<tr data-oos="53" data-low="0">
+  <td>189</td><td style="text-align:left">OB1012G-5A</td>
+  <td>OWNDAYS</td><td>32</td><td>84</td>
+  <td>2.6</td><td class="pct-high">53</td>
+  <td>0</td><td>74</td></tr>
+<tr data-oos="42" data-low="0">
+  <td>189</td><td style="text-align:left">OB2011G-5A</td>
+  <td>OWNDAYS</td><td>32</td><td>101</td>
+  <td>3.2</td><td class="pct-high">42</td>
+  <td>0</td><td>75</td></tr>
+<tr data-oos="47" data-low="0">
+  <td>189</td><td style="text-align:left">NC3030X-4S</td>
+  <td>NICHE Frame</td><td>32</td><td>138</td>
+  <td>4.3</td><td class="pct-high">47</td>
+  <td>0</td><td>89</td></tr>
+<tr data-oos="52" data-low="0">
+  <td>189</td><td style="text-align:left">NC3034G-5A</td>
+  <td>NICHE Frame</td><td>32</td><td>101</td>
+  <td>3.2</td><td class="pct-high">52</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="41" data-low="0">
+  <td>189</td><td style="text-align:left">AU2147N-5A</td>
+  <td>AIR Ultem Classic</td><td>32</td><td>113</td>
+  <td>3.5</td><td class="pct-high">41</td>
+  <td>0</td><td>84</td></tr>
+<tr data-oos="34" data-low="1">
+  <td>189</td><td style="text-align:left">SUN1077G-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>32</td><td>165</td>
+  <td>5.2</td><td class="pct-high">34</td>
+  <td>1</td><td>86</td></tr>
+<tr data-oos="16" data-low="1">
+  <td>189</td><td style="text-align:left">AU2147N-5A</td>
+  <td>AIR Ultem Classic</td><td>32</td><td>161</td>
+  <td>5.0</td><td class="pct-mid">16</td>
+  <td>1</td><td>84</td></tr>
+<tr data-oos="40" data-low="1">
+  <td>189</td><td style="text-align:left">BA1033G-2S</td>
+  <td>Based</td><td>32</td><td>125</td>
+  <td>3.9</td><td class="pct-high">40</td>
+  <td>1</td><td>77</td></tr>
+<tr data-oos="28" data-low="5">
+  <td>189</td><td style="text-align:left">OR1056X-4A</td>
+  <td>OWNDAYS Metal</td><td>32</td><td>179</td>
+  <td>5.6</td><td class="pct-mid">28</td>
+  <td>5</td><td>83</td></tr>
+<tr data-oos="64" data-low="0">
+  <td>200</td><td style="text-align:left">JD1051X-5A</td>
+  <td>John Dillinger</td><td>31</td><td>84</td>
+  <td>2.7</td><td class="pct-high">64</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="23" data-low="1">
+  <td>200</td><td style="text-align:left">LB1010G-0S</td>
+  <td>lillybell</td><td>31</td><td>218</td>
+  <td>7.0</td><td class="pct-mid">23</td>
+  <td>1</td><td>81</td></tr>
+<tr data-oos="38" data-low="0">
+  <td>200</td><td style="text-align:left">JD7001B-4S</td>
+  <td>John Dillinger</td><td>31</td><td>98</td>
+  <td>3.2</td><td class="pct-high">38</td>
+  <td>0</td><td>71</td></tr>
+<tr data-oos="48" data-low="0">
+  <td>200</td><td style="text-align:left">AF1036G-5S</td>
+  <td>AIR FIT</td><td>31</td><td>81</td>
+  <td>2.6</td><td class="pct-high">48</td>
+  <td>0</td><td>67</td></tr>
+<tr data-oos="26" data-low="1">
+  <td>200</td><td style="text-align:left">JD2043J-1A</td>
+  <td>John Dillinger</td><td>31</td><td>218</td>
+  <td>7.0</td><td class="pct-mid">26</td>
+  <td>1</td><td>92</td></tr>
+<tr data-oos="59" data-low="0">
+  <td>200</td><td style="text-align:left">NC3037G-5A</td>
+  <td>NICHE Frame</td><td>31</td><td>94</td>
+  <td>3.0</td><td class="pct-high">59</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="29" data-low="0">
+  <td>200</td><td style="text-align:left">ECO2025K-3S</td>
+  <td>ECO2XY</td><td>31</td><td>143</td>
+  <td>4.6</td><td class="pct-high">29</td>
+  <td>0</td><td>86</td></tr>
+<tr data-oos="45" data-low="0">
+  <td>200</td><td style="text-align:left">LB1016G-3S</td>
+  <td>lillybell</td><td>31</td><td>107</td>
+  <td>3.5</td><td class="pct-high">45</td>
+  <td>0</td><td>81</td></tr>
+<tr data-oos="32" data-low="1">
+  <td>200</td><td style="text-align:left">AU2098N-2A</td>
+  <td>AIR Ultem</td><td>31</td><td>121</td>
+  <td>3.9</td><td class="pct-high">32</td>
+  <td>1</td><td>81</td></tr>
+<tr data-oos="39" data-low="0">
+  <td>209</td><td style="text-align:left">SUN8006J-2S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>30</td><td>131</td>
+  <td>4.4</td><td class="pct-high">39</td>
+  <td>0</td><td>82</td></tr>
+<tr data-oos="44" data-low="1">
+  <td>209</td><td style="text-align:left">AF1036G-5S</td>
+  <td>AIR FIT</td><td>30</td><td>101</td>
+  <td>3.4</td><td class="pct-high">44</td>
+  <td>1</td><td>76</td></tr>
+<tr data-oos="49" data-low="0">
+  <td>209</td><td style="text-align:left">JD2045J-1A</td>
+  <td>John Dillinger</td><td>30</td><td>121</td>
+  <td>4.0</td><td class="pct-high">49</td>
+  <td>0</td><td>92</td></tr>
+<tr data-oos="46" data-low="0">
+  <td>209</td><td style="text-align:left">GB2042B-4S</td>
+  <td>Graph Belle</td><td>30</td><td>129</td>
+  <td>4.3</td><td class="pct-high">46</td>
+  <td>0</td><td>90</td></tr>
+<tr data-oos="34" data-low="1">
+  <td>209</td><td style="text-align:left">JD7001B-4S</td>
+  <td>John Dillinger</td><td>30</td><td>100</td>
+  <td>3.3</td><td class="pct-high">34</td>
+  <td>1</td><td>71</td></tr>
+<tr data-oos="55" data-low="1">
+  <td>209</td><td style="text-align:left">AU2117N-4A</td>
+  <td>AIR Ultem</td><td>30</td><td>106</td>
+  <td>3.5</td><td class="pct-high">55</td>
+  <td>1</td><td>88</td></tr>
+<tr data-oos="51" data-low="0">
+  <td>209</td><td style="text-align:left">AF2010X-3A</td>
+  <td>AIR FIT</td><td>30</td><td>97</td>
+  <td>3.2</td><td class="pct-high">51</td>
+  <td>0</td><td>80</td></tr>
+<tr data-oos="14" data-low="1">
+  <td>209</td><td style="text-align:left">ST2003X-5A</td>
+  <td>collaboration</td><td>30</td><td>56</td>
+  <td>1.9</td><td class="pct-mid">14</td>
+  <td>1</td><td>30</td></tr>
+<tr data-oos="47" data-low="3">
+  <td>209</td><td style="text-align:left">SUN8019F-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>30</td><td>111</td>
+  <td>3.7</td><td class="pct-high">47</td>
+  <td>3</td><td>82</td></tr>
+<tr data-oos="67" data-low="0">
+  <td>209</td><td style="text-align:left">KM1153G-4A</td>
+  <td>K.moriyama</td><td>30</td><td>75</td>
+  <td>2.5</td><td class="pct-high">67</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="39" data-low="0">
+  <td>219</td><td style="text-align:left">SUN8006J-2S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>29</td><td>158</td>
+  <td>5.4</td><td class="pct-high">39</td>
+  <td>0</td><td>86</td></tr>
+<tr data-oos="49" data-low="0">
+  <td>219</td><td style="text-align:left">JD1046G-4A</td>
+  <td>John Dillinger</td><td>29</td><td>85</td>
+  <td>2.9</td><td class="pct-high">49</td>
+  <td>0</td><td>76</td></tr>
+<tr data-oos="45" data-low="1">
+  <td>219</td><td style="text-align:left">AF1036G-5S</td>
+  <td>AIR FIT</td><td>29</td><td>76</td>
+  <td>2.6</td><td class="pct-high">45</td>
+  <td>1</td><td>67</td></tr>
+<tr data-oos="45" data-low="2">
+  <td>219</td><td style="text-align:left">JD1051X-5A</td>
+  <td>John Dillinger</td><td>29</td><td>109</td>
+  <td>3.8</td><td class="pct-high">45</td>
+  <td>2</td><td>83</td></tr>
+<tr data-oos="13" data-low="0">
+  <td>219</td><td style="text-align:left">JD2059N-5S</td>
+  <td>John Dillinger</td><td>29</td><td>344</td>
+  <td>11.9</td><td class="pct-mid">13</td>
+  <td>0</td><td>87</td></tr>
+<tr data-oos="21" data-low="0">
+  <td>219</td><td style="text-align:left">AU2107A-4A</td>
+  <td>AIR Ultem</td><td>29</td><td>254</td>
+  <td>8.8</td><td class="pct-mid">21</td>
+  <td>0</td><td>88</td></tr>
+<tr data-oos="40" data-low="1">
+  <td>219</td><td style="text-align:left">OB1004X-4A</td>
+  <td>OWNDAYS</td><td>29</td><td>122</td>
+  <td>4.2</td><td class="pct-high">40</td>
+  <td>1</td><td>82</td></tr>
+<tr data-oos="53" data-low="0">
+  <td>219</td><td style="text-align:left">AU2119N-4A</td>
+  <td>AIR Ultem</td><td>29</td><td>114</td>
+  <td>3.9</td><td class="pct-high">53</td>
+  <td>0</td><td>87</td></tr>
+<tr data-oos="37" data-low="1">
+  <td>227</td><td style="text-align:left">GB2042B-4S</td>
+  <td>Graph Belle</td><td>28</td><td>147</td>
+  <td>5.2</td><td class="pct-high">37</td>
+  <td>1</td><td>91</td></tr>
+<tr data-oos="41" data-low="1">
+  <td>227</td><td style="text-align:left">AU2116N-4A</td>
+  <td>AIR Ultem</td><td>28</td><td>100</td>
+  <td>3.6</td><td class="pct-high">41</td>
+  <td>1</td><td>71</td></tr>
+<tr data-oos="40" data-low="1">
+  <td>227</td><td style="text-align:left">OR2079E-4S</td>
+  <td>OWNDAYS Plastic</td><td>28</td><td>136</td>
+  <td>4.9</td><td class="pct-high">40</td>
+  <td>1</td><td>87</td></tr>
+<tr data-oos="42" data-low="0">
+  <td>227</td><td style="text-align:left">AU2104A-4A</td>
+  <td>AIR Ultem</td><td>28</td><td>159</td>
+  <td>5.7</td><td class="pct-high">42</td>
+  <td>0</td><td>88</td></tr>
+<tr data-oos="54" data-low="0">
+  <td>227</td><td style="text-align:left">SNP1022X-4S</td>
+  <td>OWNDAYS SNAP</td><td>28</td><td>127</td>
+  <td>4.5</td><td class="pct-high">54</td>
+  <td>0</td><td>86</td></tr>
+<tr data-oos="36" data-low="1">
+  <td>227</td><td style="text-align:left">NC3032C-4S</td>
+  <td>NICHE Frame</td><td>28</td><td>171</td>
+  <td>6.1</td><td class="pct-high">36</td>
+  <td>1</td><td>86</td></tr>
+<tr data-oos="33" data-low="0">
+  <td>227</td><td style="text-align:left">OR1057X-4A</td>
+  <td>OWNDAYS Metal</td><td>28</td><td>174</td>
+  <td>6.2</td><td class="pct-high">33</td>
+  <td>0</td><td>81</td></tr>
+<tr data-oos="43" data-low="0">
+  <td>227</td><td style="text-align:left">NC3027C-3A</td>
+  <td>NICHE Frame</td><td>28</td><td>133</td>
+  <td>4.8</td><td class="pct-high">43</td>
+  <td>0</td><td>87</td></tr>
+<tr data-oos="34" data-low="2">
+  <td>227</td><td style="text-align:left">AU2126N-5S</td>
+  <td>AIR Ultem</td><td>28</td><td>104</td>
+  <td>3.7</td><td class="pct-high">34</td>
+  <td>2</td><td>75</td></tr>
+<tr data-oos="36" data-low="0">
+  <td>227</td><td style="text-align:left">AU2150N-5A</td>
+  <td>AIR Ultem Classic</td><td>28</td><td>129</td>
+  <td>4.6</td><td class="pct-high">36</td>
+  <td>0</td><td>84</td></tr>
+<tr data-oos="30" data-low="0">
+  <td>237</td><td style="text-align:left">AU2108A-4A</td>
+  <td>AIR Ultem</td><td>27</td><td>102</td>
+  <td>3.8</td><td class="pct-high">30</td>
+  <td>0</td><td>70</td></tr>
+<tr data-oos="41" data-low="2">
+  <td>237</td><td style="text-align:left">SUN8018F-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>27</td><td>150</td>
+  <td>5.6</td><td class="pct-high">41</td>
+  <td>2</td><td>85</td></tr>
+<tr data-oos="47" data-low="0">
+  <td>237</td><td style="text-align:left">SUN1077G-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>27</td><td>107</td>
+  <td>4.0</td><td class="pct-high">47</td>
+  <td>0</td><td>82</td></tr>
+<tr data-oos="54" data-low="0">
+  <td>237</td><td style="text-align:left">AU2124N-5S</td>
+  <td>AIR Ultem</td><td>27</td><td>67</td>
+  <td>2.5</td><td class="pct-high">54</td>
+  <td>0</td><td>71</td></tr>
+<tr data-oos="20" data-low="0">
+  <td>237</td><td style="text-align:left">ST2003X-5A</td>
+  <td>collaboration</td><td>27</td><td>34</td>
+  <td>1.3</td><td class="pct-mid">20</td>
+  <td>0</td><td>30</td></tr>
+<tr data-oos="62" data-low="0">
+  <td>237</td><td style="text-align:left">JD2065X-5A</td>
+  <td>John Dillinger</td><td>27</td><td>85</td>
+  <td>3.1</td><td class="pct-high">62</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="33" data-low="0">
+  <td>237</td><td style="text-align:left">ECO2025K-3S</td>
+  <td>ECO2XY</td><td>27</td><td>136</td>
+  <td>5.0</td><td class="pct-high">33</td>
+  <td>0</td><td>88</td></tr>
+<tr data-oos="11" data-low="0">
+  <td>237</td><td style="text-align:left">GB1043G-4A</td>
+  <td>Graph Belle</td><td>27</td><td>487</td>
+  <td>18.0</td><td class="pct-mid">11</td>
+  <td>0</td><td>90</td></tr>
+<tr data-oos="58" data-low="0">
+  <td>237</td><td style="text-align:left">AF1041X-5S</td>
+  <td>AIR FIT</td><td>27</td><td>84</td>
+  <td>3.1</td><td class="pct-high">58</td>
+  <td>0</td><td>82</td></tr>
+<tr data-oos="33" data-low="0">
+  <td>237</td><td style="text-align:left">OR1056X-4A</td>
+  <td>OWNDAYS Metal</td><td>27</td><td>160</td>
+  <td>5.9</td><td class="pct-high">33</td>
+  <td>0</td><td>80</td></tr>
+<tr data-oos="50" data-low="2">
+  <td>237</td><td style="text-align:left">ECO2029N-4S</td>
+  <td>ECO2XY</td><td>27</td><td>122</td>
+  <td>4.5</td><td class="pct-high">50</td>
+  <td>2</td><td>85</td></tr>
+<tr data-oos="37" data-low="3">
+  <td>237</td><td style="text-align:left">AU2127N-5S</td>
+  <td>AIR Ultem</td><td>27</td><td>144</td>
+  <td>5.3</td><td class="pct-high">37</td>
+  <td>3</td><td>82</td></tr>
+<tr data-oos="38" data-low="0">
+  <td>237</td><td style="text-align:left">AU2115N-4A</td>
+  <td>AIR Ultem</td><td>27</td><td>80</td>
+  <td>3.0</td><td class="pct-high">38</td>
+  <td>0</td><td>67</td></tr>
+<tr data-oos="50" data-low="0">
+  <td>250</td><td style="text-align:left">AF1038G-5S</td>
+  <td>AIR FIT</td><td>26</td><td>68</td>
+  <td>2.6</td><td class="pct-high">50</td>
+  <td>0</td><td>69</td></tr>
+<tr data-oos="26" data-low="3">
+  <td>250</td><td style="text-align:left">AU2105A-4A</td>
+  <td>AIR Ultem</td><td>26</td><td>205</td>
+  <td>7.9</td><td class="pct-mid">26</td>
+  <td>3</td><td>86</td></tr>
+<tr data-oos="48" data-low="3">
+  <td>250</td><td style="text-align:left">NC3036G-5A</td>
+  <td>NICHE Frame</td><td>26</td><td>106</td>
+  <td>4.1</td><td class="pct-high">48</td>
+  <td>3</td><td>83</td></tr>
+<tr data-oos="72" data-low="0">
+  <td>250</td><td style="text-align:left">AU2149N-5A</td>
+  <td>AIR Ultem Classic</td><td>26</td><td>34</td>
+  <td>1.3</td><td class="pct-high">72</td>
+  <td>0</td><td>77</td></tr>
+<tr data-oos="23" data-low="1">
+  <td>250</td><td style="text-align:left">AF1034G-3A</td>
+  <td>AIR FIT</td><td>26</td><td>195</td>
+  <td>7.5</td><td class="pct-mid">23</td>
+  <td>1</td><td>83</td></tr>
+<tr data-oos="26" data-low="1">
+  <td>255</td><td style="text-align:left">NC3030X-4S</td>
+  <td>NICHE Frame</td><td>25</td><td>189</td>
+  <td>7.6</td><td class="pct-mid">26</td>
+  <td>1</td><td>86</td></tr>
+<tr data-oos="18" data-low="1">
+  <td>255</td><td style="text-align:left">OB1014G-5A</td>
+  <td>OWNDAYS</td><td>25</td><td>159</td>
+  <td>6.4</td><td class="pct-mid">18</td>
+  <td>1</td><td>84</td></tr>
+<tr data-oos="23" data-low="1">
+  <td>255</td><td style="text-align:left">ECO2025K-3S</td>
+  <td>ECO2XY</td><td>25</td><td>153</td>
+  <td>6.1</td><td class="pct-mid">23</td>
+  <td>1</td><td>86</td></tr>
+<tr data-oos="42" data-low="0">
+  <td>255</td><td style="text-align:left">GB2041C-4S</td>
+  <td>Graph Belle</td><td>25</td><td>122</td>
+  <td>4.9</td><td class="pct-high">42</td>
+  <td>0</td><td>81</td></tr>
+<tr data-oos="32" data-low="0">
+  <td>255</td><td style="text-align:left">JD1013K-8S</td>
+  <td>John Dillinger</td><td>25</td><td>204</td>
+  <td>8.2</td><td class="pct-high">32</td>
+  <td>0</td><td>90</td></tr>
+<tr data-oos="38" data-low="1">
+  <td>255</td><td style="text-align:left">FC2038N-5S</td>
+  <td>FUWA CELLU</td><td>25</td><td>155</td>
+  <td>6.2</td><td class="pct-high">38</td>
+  <td>1</td><td>78</td></tr>
+<tr data-oos="43" data-low="0">
+  <td>255</td><td style="text-align:left">NC3034G-5A</td>
+  <td>NICHE Frame</td><td>25</td><td>118</td>
+  <td>4.7</td><td class="pct-high">43</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="36" data-low="1">
+  <td>255</td><td style="text-align:left">OB1009G-5A</td>
+  <td>OWNDAYS</td><td>25</td><td>109</td>
+  <td>4.4</td><td class="pct-high">36</td>
+  <td>1</td><td>74</td></tr>
+<tr data-oos="67" data-low="0">
+  <td>255</td><td style="text-align:left">OB2018G-5A</td>
+  <td>OWNDAYS</td><td>25</td><td>30</td>
+  <td>1.2</td><td class="pct-high">67</td>
+  <td>0</td><td>73</td></tr>
+<tr data-oos="9" data-low="2">
+  <td>255</td><td style="text-align:left">AU2110A-5S</td>
+  <td>AIR Ultem</td><td>25</td><td>244</td>
+  <td>9.8</td><td class="pct-mid">9</td>
+  <td>2</td><td>88</td></tr>
+<tr data-oos="17" data-low="0">
+  <td>255</td><td style="text-align:left">LB1011G-0S</td>
+  <td>lillybell</td><td>25</td><td>229</td>
+  <td>9.2</td><td class="pct-mid">17</td>
+  <td>0</td><td>85</td></tr>
+<tr data-oos="54" data-low="0">
+  <td>255</td><td style="text-align:left">NC3032C-4S</td>
+  <td>NICHE Frame</td><td>25</td><td>90</td>
+  <td>3.6</td><td class="pct-high">54</td>
+  <td>0</td><td>84</td></tr>
+<tr data-oos="28" data-low="0">
+  <td>255</td><td style="text-align:left">MV2005N-5S</td>
+  <td>AIR For Men</td><td>25</td><td>103</td>
+  <td>4.1</td><td class="pct-mid">28</td>
+  <td>0</td><td>68</td></tr>
+<tr data-oos="11" data-low="1">
+  <td>255</td><td style="text-align:left">AU2107A-4A</td>
+  <td>AIR Ultem</td><td>25</td><td>297</td>
+  <td>11.9</td><td class="pct-mid">11</td>
+  <td>1</td><td>88</td></tr>
+<tr data-oos="43" data-low="0">
+  <td>255</td><td style="text-align:left">BA1034G-2S</td>
+  <td>Based</td><td>25</td><td>95</td>
+  <td>3.8</td><td class="pct-high">43</td>
+  <td>0</td><td>74</td></tr>
+<tr data-oos="49" data-low="0">
+  <td>270</td><td style="text-align:left">SUN8019F-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>24</td><td>93</td>
+  <td>3.9</td><td class="pct-high">49</td>
+  <td>0</td><td>71</td></tr>
+<tr data-oos="9" data-low="1">
+  <td>270</td><td style="text-align:left">ST1002X-5A</td>
+  <td>collaboration</td><td>24</td><td>74</td>
+  <td>3.1</td><td class="pct-mid">9</td>
+  <td>1</td><td>30</td></tr>
+<tr data-oos="21" data-low="0">
+  <td>270</td><td style="text-align:left">OB2012G-5A</td>
+  <td>OWNDAYS</td><td>24</td><td>145</td>
+  <td>6.0</td><td class="pct-mid">21</td>
+  <td>0</td><td>78</td></tr>
+<tr data-oos="53" data-low="0">
+  <td>270</td><td style="text-align:left">AU2125N-5S</td>
+  <td>AIR Ultem</td><td>24</td><td>45</td>
+  <td>1.9</td><td class="pct-high">53</td>
+  <td>0</td><td>59</td></tr>
+<tr data-oos="42" data-low="0">
+  <td>270</td><td style="text-align:left">AF1042X-5S</td>
+  <td>AIR FIT</td><td>24</td><td>89</td>
+  <td>3.7</td><td class="pct-high">42</td>
+  <td>0</td><td>72</td></tr>
+<tr data-oos="30" data-low="1">
+  <td>270</td><td style="text-align:left">JD1013K-8S</td>
+  <td>John Dillinger</td><td>24</td><td>208</td>
+  <td>8.7</td><td class="pct-high">30</td>
+  <td>1</td><td>83</td></tr>
+<tr data-oos="42" data-low="0">
+  <td>270</td><td style="text-align:left">AU2149N-5A</td>
+  <td>AIR Ultem Classic</td><td>24</td><td>94</td>
+  <td>3.9</td><td class="pct-high">42</td>
+  <td>0</td><td>76</td></tr>
+<tr data-oos="42" data-low="2">
+  <td>270</td><td style="text-align:left">SUN2117N-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>24</td><td>91</td>
+  <td>3.8</td><td class="pct-high">42</td>
+  <td>2</td><td>73</td></tr>
+<tr data-oos="39" data-low="1">
+  <td>270</td><td style="text-align:left">SUN1077G-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>24</td><td>122</td>
+  <td>5.1</td><td class="pct-high">39</td>
+  <td>1</td><td>77</td></tr>
+<tr data-oos="43" data-low="0">
+  <td>270</td><td style="text-align:left">KM1153G-4A</td>
+  <td>K.moriyama</td><td>24</td><td>77</td>
+  <td>3.2</td><td class="pct-high">43</td>
+  <td>0</td><td>66</td></tr>
+<tr data-oos="42" data-low="0">
+  <td>270</td><td style="text-align:left">LB1017G-4S</td>
+  <td>lillybell</td><td>24</td><td>100</td>
+  <td>4.2</td><td class="pct-high">42</td>
+  <td>0</td><td>74</td></tr>
+<tr data-oos="41" data-low="1">
+  <td>270</td><td style="text-align:left">OB2010X-5A</td>
+  <td>OWNDAYS</td><td>24</td><td>130</td>
+  <td>5.4</td><td class="pct-high">41</td>
+  <td>1</td><td>84</td></tr>
+<tr data-oos="29" data-low="0">
+  <td>270</td><td style="text-align:left">AU2149N-5A</td>
+  <td>AIR Ultem Classic</td><td>24</td><td>133</td>
+  <td>5.5</td><td class="pct-high">29</td>
+  <td>0</td><td>81</td></tr>
+<tr data-oos="34" data-low="2">
+  <td>270</td><td style="text-align:left">SUN1078G-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>24</td><td>123</td>
+  <td>5.1</td><td class="pct-high">34</td>
+  <td>2</td><td>82</td></tr>
+<tr data-oos="45" data-low="0">
+  <td>270</td><td style="text-align:left">JD2065X-5A</td>
+  <td>John Dillinger</td><td>24</td><td>113</td>
+  <td>4.7</td><td class="pct-high">45</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="56" data-low="0">
+  <td>270</td><td style="text-align:left">KM1148G-3A</td>
+  <td>K.moriyama</td><td>24</td><td>75</td>
+  <td>3.1</td><td class="pct-high">56</td>
+  <td>0</td><td>75</td></tr>
+<tr data-oos="37" data-low="0">
+  <td>270</td><td style="text-align:left">NC3037G-5A</td>
+  <td>NICHE Frame</td><td>24</td><td>115</td>
+  <td>4.8</td><td class="pct-high">37</td>
+  <td>0</td><td>83</td></tr>
+<tr data-oos="43" data-low="2">
+  <td>270</td><td style="text-align:left">OR2029N-9S</td>
+  <td>OWNDAYS Plastic</td><td>24</td><td>167</td>
+  <td>7.0</td><td class="pct-high">43</td>
+  <td>2</td><td>90</td></tr>
+<tr data-oos="60" data-low="0">
+  <td>288</td><td style="text-align:left">OB2022G-5A</td>
+  <td>OWNDAYS</td><td>23</td><td>72</td>
+  <td>3.1</td><td class="pct-high">60</td>
+  <td>0</td><td>78</td></tr>
+<tr data-oos="46" data-low="0">
+  <td>288</td><td style="text-align:left">AU2106A-4A</td>
+  <td>AIR Ultem</td><td>23</td><td>110</td>
+  <td>4.8</td><td class="pct-high">46</td>
+  <td>0</td><td>81</td></tr>
+<tr data-oos="38" data-low="0">
+  <td>288</td><td style="text-align:left">AF1037G-5S</td>
+  <td>AIR FIT</td><td>23</td><td>68</td>
+  <td>3.0</td><td class="pct-high">38</td>
+  <td>0</td><td>60</td></tr>
+<tr data-oos="47" data-low="0">
+  <td>288</td><td style="text-align:left">NC3010K-0S</td>
+  <td>NICHE Frame</td><td>23</td><td>56</td>
+  <td>2.4</td><td class="pct-high">47</td>
+  <td>0</td><td>64</td></tr>
+<tr data-oos="21" data-low="0">
+  <td>288</td><td style="text-align:left">AU2105A-4A</td>
+  <td>AIR Ultem</td><td>23</td><td>209</td>
+  <td>9.1</td><td class="pct-mid">21</td>
+  <td>0</td><td>85</td></tr>
+<tr data-oos="56" data-low="0">
+  <td>288</td><td style="text-align:left">OB2008X-5A</td>
+  <td>OWNDAYS</td><td>23</td><td>91</td>
+  <td>4.0</td><td class="pct-high">56</td>
+  <td>0</td><td>79</td></tr>
+<tr data-oos="33" data-low="1">
+  <td>288</td><td style="text-align:left">OR2027N-8A</td>
+  <td>OWNDAYS Plastic</td><td>23</td><td>203</td>
+  <td>8.8</td><td class="pct-high">33</td>
+  <td>1</td><td>82</td></tr>
+<tr data-oos="44" data-low="0">
+  <td>288</td><td style="text-align:left">SUN7008X-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>23</td><td>142</td>
+  <td>6.2</td><td class="pct-high">44</td>
+  <td>0</td><td>84</td></tr>
+<tr data-oos="53" data-low="1">
+  <td>288</td><td style="text-align:left">SUN2111G-5S</td>
+  <td>OWNDAYS SUNGLASSES COLLECTION</td><td>23</td><td>115</td>
+  <td>5.0</td><td class="pct-high">53</td>
+  <td>1</td><td>86</td></tr>
+<tr data-oos="55" data-low="0">
+  <td>288</td><td style="text-align:left">AU2102T-3A</td>
+  <td>AIR Ultem</td><td>23</td><td>56</td>
+  <td>2.4</td><td class="pct-high">55</td>
+  <td>0</td><td>67</td></tr>
+<tr data-oos="41" data-low="1">
+  <td>288</td><td style="text-align:left">FC2034U-4S</td>
+  <td>FUWA CELLU</td><td>23</td><td>117</td>
+  <td>5.1</td><td class="pct-high">41</td>
+  <td>1</td><td>80</td></tr>
+<tr data-oos="13" data-low="0">
+  <td>288</td><td style="text-align:left">GB1043G-4A</td>
+  <td>Graph Belle</td><td>23</td><td>406</td>
+  <td>17.7</td><td class="pct-mid">13</td>
+  <td>0</td><td>90</td></tr>
+<tr data-oos="53" data-low="0">
+  <td>288</td><td style="text-align:left">OB1009G-5A</td>
+  <td>OWNDAYS</td><td>23</td><td>97</td>
+  <td>4.2</td><td class="pct-high">53</td>
+  <td>0</td><td>79</td></tr>
+</tbody></table></div></div></div>
+
+</div><!-- container -->
+
+<script>
+function showTab(id) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function filterTable(tableId, colIdx, query, cols) {
+  const rows = document.querySelectorAll('#' + tableId + ' tbody tr');
+  const q = query.toLowerCase();
+  rows.forEach(row => {
+    if (row.classList.contains('nat-row')) return;
+    const searchCols = cols || [colIdx];
+    let match = false;
+    searchCols.forEach(ci => {
+      const cell = row.cells[ci];
+      if (cell && cell.textContent.toLowerCase().includes(q)) match = true;
+    });
+    row.style.display = match ? '' : 'none';
+  });
+}
+
+function filterNatStatus(val) {
+  const rows = document.querySelectorAll('#national-table tbody tr');
+  rows.forEach(row => {
+    if (!val) { row.style.display = ''; return; }
+    const oos = parseInt(row.dataset.oos || '0');
+    const low = parseInt(row.dataset.low || '0');
+    if (val === 'oos') row.style.display = oos > 0 ? '' : 'none';
+    else if (val === 'low') row.style.display = low > 0 ? '' : 'none';
+  });
+}
+</script>
+</body>
+</html>

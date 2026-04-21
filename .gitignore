@@ -1,0 +1,6 @@
+*.xlsx
+*.xls
+*.pyc
+__pycache__/
+.env
+*.crdownload
