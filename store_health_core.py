@@ -158,7 +158,7 @@ STORE_LIST_URL = (
 
 def fetch_live_store_list(timeout=15):
     """Fetch active store list from Google Sheets.
-    Returns set of store names, or None if fetch fails.
+    Returns dict mapping store_name -> store_number, or None if fetch fails.
     Sheet columns: A=店鋪No., B=店名, C=分區
     """
     try:
@@ -167,21 +167,37 @@ def fetch_live_store_list(timeout=15):
         csv_data = resp.read().decode('utf-8')
         df = pd.read_csv(io.StringIO(csv_data), header=1)  # header at row 2 (0-indexed row 1)
 
-        # Find the store name column (店名)
+        # Find the store number and name columns
+        num_col = None
         name_col = None
         for c in df.columns:
-            if '店名' in str(c):
+            col_str = str(c).strip()
+            if '店鋪No' in col_str or '店鋪号' in col_str or '店號' in col_str:
+                num_col = c
+            if '店名' in col_str:
                 name_col = c
-                break
+
         if name_col is None:
             # Fallback: second column
             name_col = df.columns[1] if len(df.columns) > 1 else df.columns[0]
+        if num_col is None:
+            # Fallback: first column
+            num_col = df.columns[0]
 
-        stores = set()
-        for val in df[name_col].dropna():
-            s = str(val).strip()
+        stores = {}
+        for idx, row in df.iterrows():
+            name_val = row[name_col] if name_col in row.index else None
+            num_val = row[num_col] if num_col in row.index else None
+
+            if pd.isna(name_val):
+                continue
+            s = str(name_val).strip()
             if s and s != 'nan':
-                stores.add(s)
+                # Get store number if available
+                store_num = ''
+                if num_val and not pd.isna(num_val):
+                    store_num = str(num_val).strip()
+                stores[s] = store_num
 
         print(f"    -> Live store list: {len(stores)} active stores")
         return stores
@@ -191,22 +207,42 @@ def fetch_live_store_list(timeout=15):
         return None
 
 
-def filter_by_live_list(retail_stores, live_stores):
-    """Filter retail stores to only those in the live list.
-    Uses fuzzy matching: live list name must be contained in data store name or vice versa.
+def filter_by_live_list(retail_stores, live_stores_dict):
+    """Filter retail stores to only those in the live list (dict: store_name -> store_number).
+    Uses stricter fuzzy matching: substring match only if shorter string is >= 45% of longer string length.
+    Returns (matched_stores_list, store_number_map).
     """
-    if not live_stores:
-        return retail_stores
+    if not live_stores_dict:
+        return retail_stores, {}
 
     matched = []
     removed = []
+    store_number_map = {}
+
     for store in retail_stores:
-        # Exact match or substring match (data name may have extra chars)
-        if store in live_stores:
+        # Exact match
+        if store in live_stores_dict:
             matched.append(store)
-        elif any(ls in store or store in ls for ls in live_stores):
-            matched.append(store)
-        else:
+            store_number_map[store] = live_stores_dict[store]
+            continue
+
+        # Stricter fuzzy matching
+        found = False
+        for ls, store_num in live_stores_dict.items():
+            # Check if one is substring of the other
+            if ls in store or store in ls:
+                # Stricter: shorter must be >= 45% of longer
+                # Blocks "淡水"(2) vs "淡水大都會廣場"(6) = 33% < 45%
+                # Allows "巨城"(2) vs "新竹巨城"(4) = 50% >= 45%
+                shorter = min(len(ls), len(store))
+                longer = max(len(ls), len(store))
+                if shorter >= longer * 0.45:
+                    matched.append(store)
+                    store_number_map[store] = store_num
+                    found = True
+                    break
+
+        if not found:
             removed.append(store)
 
     if removed:
@@ -214,7 +250,7 @@ def filter_by_live_list(retail_stores, live_stores):
         for s in sorted(removed):
             print(f"       - {s}")
 
-    return matched
+    return matched, store_number_map
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -666,9 +702,11 @@ def run_analysis(frame_file, cl_file, sales_days, cl_sales_days=60,
 
     # Cross-check with live store list from Google Sheets
     print(f"\n    Fetching live store list from Google Sheets...")
-    live_stores = fetch_live_store_list()
-    if live_stores:
-        retail_stores = filter_by_live_list(retail_stores, live_stores)
+    live_stores_dict = fetch_live_store_list()
+    store_number_map = {}
+    if live_stores_dict:
+        retail_stores, store_number_map = filter_by_live_list(retail_stores, live_stores_dict)
+        print(f"    -> Active stores: {len(retail_stores)}, Excluded: {len(live_stores_dict) - len(retail_stores)}")
 
     if store_filter:
         retail_stores = [s for s in retail_stores
@@ -738,6 +776,7 @@ def run_analysis(frame_file, cl_file, sales_days, cl_sales_days=60,
         'df_contact': df_contact,
         'brand_df': brand_df,
         'retail_stores': retail_stores,
+        'store_number_map': store_number_map,
         'summary': summary,
     }
 
@@ -841,23 +880,63 @@ def generate_report(results, output_path):
         ws.cell(row=r, column=2, value=v).font = BLACK_REG
         ws.cell(row=r, column=2).alignment = CENTER
 
+    # ── Top 10 Dead Stock Items (national quick reference) ────────
+    start_row = len(metrics) + 3
+    if 'is_dead_stock' in df_frames.columns:
+        dead_frames = df_frames[df_frames['is_dead_stock'] == True].copy()
+    else:
+        dead_frames = pd.DataFrame()
+
+    if not dead_frames.empty:
+        dead_national = dead_frames.groupby('PLU', as_index=False).agg(
+            品番=('品番', 'first'),
+            ブランド=('ブランド', 'first') if 'ブランド' in dead_frames.columns else ('品番', 'first'),
+            total_inv=('inventory', 'sum'),
+            store_count=('store_name', 'nunique'),
+        ).nlargest(10, 'total_inv')
+
+        if not dead_national.empty:
+            ws.cell(row=start_row, column=1, value='⚫ 全國無用庫存 Top 10').font = Font(name='Arial', bold=True, size=11, color='434343')
+            start_row += 1
+
+            dead_headers = ['排名', '品番', 'ブランド', '總庫存', '涉及門市數']
+            for ci, h in enumerate(dead_headers, 1):
+                ws.cell(row=start_row, column=ci, value=h)
+            _style_header(ws, start_row, len(dead_headers), fill=DARK_FILL)
+            start_row += 1
+
+            for idx, (_, row) in enumerate(dead_national.iterrows(), 1):
+                data = [
+                    idx, row['品番'], row.get('ブランド', ''),
+                    int(row['total_inv']), int(row['store_count']),
+                ]
+                _write_row(ws, start_row, data, fill=ALT_GRAY)
+                start_row += 1
+            start_row += 1
+
     # ── Per-store Top N 庫存不足% summary ────────────────────────
-    start_row = len(metrics) + 4
+    start_row += 1
     ws.cell(row=start_row, column=1, value='📊 各門市庫存不足% (缺貨 + 庫存緊張)').font = Font(name='Arial', bold=True, size=12, color='1A73E8')
     start_row += 1
 
-    store_summary_headers = ['No.', '門市', 'Top 50', 'Top 100', 'Top 200', 'Top 300']
+    store_number_map = results.get('store_number_map', {})
+    store_summary_headers = ['No.', '店號', '門市', 'Top 50', 'Top 100', 'Top 200', 'Top 300']
     for ci, h in enumerate(store_summary_headers, 1):
         ws.cell(row=start_row, column=ci, value=h)
     _style_header(ws, start_row, len(store_summary_headers))
     start_row += 1
 
     # Helper: compute top-N shortage % for a given frame subset
-    def _top_n_shortage(frames_subset):
+    # per_store=False (national): filter by national_rank <= N (each SKU has rows across all stores)
+    # per_store=True: use .head(N) since each store has one row per SKU
+    def _top_n_shortage(frames_subset, per_store=False):
         row_data = {}
         sorted_frames = frames_subset.sort_values('national_rank', ascending=True)
         for top_n in [50, 100, 200, 300]:
-            tier = sorted_frames.head(top_n)
+            if per_store:
+                tier = sorted_frames.head(top_n)
+            else:
+                tier = sorted_frames[sorted_frames['national_rank'] <= top_n]
             n_actual = len(tier)
             if n_actual == 0:
                 row_data[top_n] = 'N/A'
@@ -869,17 +948,17 @@ def generate_report(results, output_path):
 
     # National row first
     national_pcts = _top_n_shortage(df_frames)
-    _write_row(ws, start_row, ['—', '全國',
+    _write_row(ws, start_row, ['—', '—', '全國',
                national_pcts[50], national_pcts[100], national_pcts[200], national_pcts[300]],
                fill=PatternFill(start_color='E8F0FE', end_color='E8F0FE', fill_type='solid'))
-    ws.cell(row=start_row, column=2).font = BLACK_BOLD
+    ws.cell(row=start_row, column=3).font = BLACK_BOLD
     start_row += 1
 
     # Per-store rows sorted by Top 50 shortage % descending (worst first)
     store_pct_list = []
     for store in sorted(retail_stores):
         sf = df_frames[df_frames['store_name'] == store]
-        pcts = _top_n_shortage(sf)
+        pcts = _top_n_shortage(sf, per_store=True)
         # Parse top50 % for sorting
         try:
             sort_val = float(pcts[50].replace('%', ''))
@@ -891,7 +970,8 @@ def generate_report(results, output_path):
 
     for idx, (store, pcts, sort_val) in enumerate(store_pct_list, 1):
         fill = RED_FILL if sort_val > 70 else (YELLOW_FILL if sort_val > 50 else None)
-        _write_row(ws, start_row, [idx, store, pcts[50], pcts[100], pcts[200], pcts[300]], fill=fill)
+        store_num = store_number_map.get(store, '')
+        _write_row(ws, start_row, [idx, store_num, store, pcts[50], pcts[100], pcts[200], pcts[300]], fill=fill)
         start_row += 1
 
     # ── Brand Displayable SKU Matrix ────────────────────────────────────
@@ -920,8 +1000,8 @@ def generate_report(results, output_path):
         # Add Total per store
         brand_pivot['Total'] = brand_pivot[brand_order].sum(axis=1)
 
-        # Headers: No., 門市, Total, Brand1, Brand2, ...
-        brand_headers = ['No.', '門市', 'Total'] + brand_order
+        # Headers: No., 店號, 門市, Total, Brand1, Brand2, ...
+        brand_headers = ['No.', '店號', '門市', 'Total'] + brand_order
         for ci, h in enumerate(brand_headers, 1):
             ws.cell(row=start_row, column=ci, value=h)
         _style_header(ws, start_row, len(brand_headers),
@@ -936,10 +1016,11 @@ def generate_report(results, output_path):
             else:
                 total_val = 0
                 row_vals = [0] * len(brand_order)
-            data = [idx, store, total_val] + row_vals
+            store_num = store_number_map.get(store, '')
+            data = [idx, store_num, store, total_val] + row_vals
             _write_row(ws, start_row, data)
             # Bold the Total column
-            ws.cell(row=start_row, column=3).font = BLACK_BOLD
+            ws.cell(row=start_row, column=4).font = BLACK_BOLD
             # Color code brand columns (starting at column 4)
             for bi, val in enumerate(row_vals):
                 cell = ws.cell(row=start_row, column=bi + 4)
@@ -953,11 +1034,11 @@ def generate_report(results, output_path):
 
         # Total row
         grand_total = int(brand_pivot['Total'].sum())
-        total_data = ['—', '全國合計', grand_total] + [int(brand_pivot[b].sum()) for b in brand_order]
+        total_data = ['—', '—', '全國合計', grand_total] + [int(brand_pivot[b].sum()) for b in brand_order]
         _write_row(ws, start_row, total_data,
                    fill=PatternFill('solid', fgColor='E8F0FE'))
-        ws.cell(row=start_row, column=2).font = BLACK_BOLD
         ws.cell(row=start_row, column=3).font = BLACK_BOLD
+        ws.cell(row=start_row, column=4).font = BLACK_BOLD
         start_row += 1
 
     _auto_width(ws)
@@ -1115,7 +1196,9 @@ def generate_report(results, output_path):
         # Sort by national_rank so Top N = "全台銷售排名前 N 的 SKU 在這家店的狀況"
         all_frames_by_rank = store_frames.sort_values('national_rank', ascending=True)
         all_frames_sorted = store_frames.sort_values('sales', ascending=False)
-        ws.cell(row=current_row, column=1, value=f'📊 {store} 庫存健康摘要').font = Font(name='Arial', bold=True, size=12, color='1A73E8')
+        store_num = store_number_map.get(store, '')
+        store_header = f'{store} ({store_num})' if store_num else store
+        ws.cell(row=current_row, column=1, value=f'📊 {store_header} 庫存健康摘要').font = Font(name='Arial', bold=True, size=12, color='1A73E8')
         current_row += 1
 
         tier_headers = ['排名區間', 'SKU數', '缺貨數', '庫存緊張數', '庫存不足%']
@@ -1263,7 +1346,11 @@ def generate_report(results, output_path):
         _style_header(ws, current_row, len(dead_headers), fill=DARK_FILL)
         current_row += 1
 
-        dead = store_frames[store_frames.get('is_dead_stock', False) == True].sort_values('inventory', ascending=False)
+        if 'is_dead_stock' in store_frames.columns:
+            dead = store_frames[store_frames['is_dead_stock'] == True].sort_values('inventory', ascending=False)
+        else:
+            dead = pd.DataFrame()
+
         for _, row in dead.iterrows():
             doh_display = f"{row['doh_months']:.1f}" if row['doh_months'] < 9999 else '∞'
             data = [
@@ -1287,7 +1374,7 @@ def generate_report(results, output_path):
     all_needs = df_frames[df_frames['needs_replenish']].sort_values(
         ['store_name', 'sales'], ascending=[True, False])
 
-    sum_headers = ['門市', '品番', 'カラー', 'PLU', 'ブランド', '銷量', '在庫',
+    sum_headers = ['店號', '門市', '品番', 'カラー', 'PLU', 'ブランド', '銷量', '在庫',
                    'DOH(月)', '全台排名', '狀態', '建議補貨', '建議調貨門市']
     ws_summary.append(sum_headers)
     _style_header(ws_summary, 1, len(sum_headers))
@@ -1297,9 +1384,10 @@ def generate_report(results, output_path):
         status = '缺貨' if row['is_stockout'] else '庫存緊張'
         doh_display = f"{row['doh_months']:.1f}" if row['doh_months'] < 9999 else '∞'
         donor_str = donor_map.get((row['store_name'], row['PLU']), '')
+        store_num = store_number_map.get(row['store_name'], '')
 
         data = [
-            row['store_name'], row['品番'], row.get('カラー', ''), row['PLU'],
+            store_num, row['store_name'], row['品番'], row.get('カラー', ''), row['PLU'],
             row.get('ブランド', ''), int(row['sales']), int(row['inventory']),
             doh_display, int(row['national_rank']), status,
             int(row['replenish_qty']), donor_str,
@@ -1310,15 +1398,15 @@ def generate_report(results, output_path):
 
     _auto_width(ws_summary, min_width=10, max_width=35)
 
-    # ── Sheet: 全台CL補貨需求 ─────────────────────────────────────────────
+    # ── Sheet: 全台隱形眼鏡補貨需求 ─────────────────────────────────────────────
     if not df_contact.empty:
-        ws_cl = wb.create_sheet(title='全台CL補貨需求')
+        ws_cl = wb.create_sheet(title='全台隱形眼鏡補貨需求')
         ws_cl.sheet_properties.tabColor = 'E67C00'
 
         cl_needs = df_contact[df_contact['needs_replenish']].sort_values(
             ['store_name', 'sales'], ascending=[True, False])
 
-        cl_sum_headers = ['門市', '品番', '度數', 'PLU', '銷量(60d)', '在庫',
+        cl_sum_headers = ['店號', '門市', '品番', '度數', 'PLU', '銷量(60d)', '在庫',
                           'DOH(月)', '狀態', '建議補貨']
         ws_cl.append(cl_sum_headers)
         _style_header(ws_cl, 1, len(cl_sum_headers))
@@ -1327,8 +1415,9 @@ def generate_report(results, output_path):
         for _, row in cl_needs.iterrows():
             status = '缺貨' if row['is_stockout'] else '庫存緊張'
             doh_display = f"{row['doh_months']:.1f}" if row['doh_months'] < 9999 else '∞'
+            store_num = store_number_map.get(row['store_name'], '')
             data = [
-                row['store_name'], row['品番'], row.get('degree', ''), row['PLU'],
+                store_num, row['store_name'], row['品番'], row.get('degree', ''), row['PLU'],
                 int(row['sales']), int(row['inventory']), doh_display,
                 status, int(row['replenish_qty']),
             ]
@@ -1341,18 +1430,22 @@ def generate_report(results, output_path):
     ws_dead = wb.create_sheet(title='全台無用庫存')
     ws_dead.sheet_properties.tabColor = '434343'
 
-    dead_all = df_frames[df_frames.get('is_dead_stock', False) == True].sort_values(
-        ['store_name', 'inventory'], ascending=[True, False])
+    if 'is_dead_stock' in df_frames.columns:
+        dead_all = df_frames[df_frames['is_dead_stock'] == True].sort_values(
+            ['store_name', 'inventory'], ascending=[True, False])
+    else:
+        dead_all = pd.DataFrame()
 
-    dead_sum_headers = ['門市', '品番', 'カラー', 'PLU', 'ブランド', '銷量', '在庫', 'DOH(月)', '原因']
+    dead_sum_headers = ['店號', '門市', '品番', 'カラー', 'PLU', 'ブランド', '銷量', '在庫', 'DOH(月)', '原因']
     ws_dead.append(dead_sum_headers)
     _style_header(ws_dead, 1, len(dead_sum_headers))
 
     row_num = 2
     for _, row in dead_all.iterrows():
         doh_display = f"{row['doh_months']:.1f}" if row['doh_months'] < 9999 else '∞'
+        store_num = store_number_map.get(row['store_name'], '')
         data = [
-            row['store_name'], row['品番'], row.get('カラー', ''), row['PLU'],
+            store_num, row['store_name'], row['品番'], row.get('カラー', ''), row['PLU'],
             row.get('ブランド', ''), int(row['sales']), int(row['inventory']),
             doh_display, row.get('dead_reason', ''),
         ]
@@ -1365,7 +1458,7 @@ def generate_report(results, output_path):
         ws_brand = wb.create_sheet(title='全台Brand分析')
         ws_brand.sheet_properties.tabColor = '0B8043'
 
-        brand_headers = ['門市', '品牌', '佔銷量%', 'SKU數', '可陳列SKU(≥2)',
+        brand_headers = ['店號', '門市', '品牌', '佔銷量%', 'SKU數', '可陳列SKU(≥2)',
                          '總庫存', '可銷庫存', 'DOH(月)']
         ws_brand.append(brand_headers)
         _style_header(ws_brand, 1, len(brand_headers), fill=PatternFill('solid', fgColor='0B8043'))
@@ -1373,8 +1466,9 @@ def generate_report(results, output_path):
         row_num = 2
         for _, row in brand_df.iterrows():
             doh_display = f"{row['doh_months']:.1f}" if row['doh_months'] < 9999 else '∞'
+            store_num = store_number_map.get(row['store_name'], '')
             data = [
-                row['store_name'], row['ブランド'],
+                store_num, row['store_name'], row['ブランド'],
                 f"{row['sales_pct']:.1%}",
                 int(row['sku_count']), int(row['displayable_sku_count']),
                 int(row['total_inv']), int(row['displayable_inv']),

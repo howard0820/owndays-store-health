@@ -392,6 +392,20 @@ def main():
     output_path = os.path.join(BASE_DIR, output_name)
     generate_report(results, output_path)
 
+    # AI Insight + Anomaly Alerts
+    insight_data = None
+    try:
+        from store_health_insight import run_insight_and_alerts
+        insight_data = run_insight_and_alerts(results, base_date=str(base_date))
+    except Exception as e:
+        print(f"\n[INSIGHT] Error: {e} (continuing without insight)")
+
+    # Inject insight into results for HTML
+    if insight_data and insight_data.get('insight'):
+        results['ai_insight'] = insight_data['insight']
+    if insight_data and insight_data.get('alerts'):
+        results['ai_alerts'] = insight_data['alerts']
+
     # Generate HTML dashboard
     html_name = f"StoreHealth_{base_date}_{sales_days}d.html"
     html_path = os.path.join(BASE_DIR, html_name)
@@ -407,6 +421,8 @@ def main():
     print(f"  Excel: {output_name}")
     print(f"  HTML:  {html_name}")
     print(f"  GitHub Pages: docs/index.html")
+    if insight_data and insight_data.get('alerts'):
+        print(f"  Alerts: {len(insight_data['alerts'])} anomalies detected")
     print(f"{'=' * 60}")
 
 

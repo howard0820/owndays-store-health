@@ -17,6 +17,9 @@ def generate_html_report(results, output_path):
     df_contact = results['df_contact']
     brand_df = results['brand_df']
     retail_stores = results['retail_stores']
+    store_number_map = results.get('store_number_map', {})
+    ai_insight = results.get('ai_insight', '')
+    ai_alerts = results.get('ai_alerts', [])
     summary = results['summary']
     sales_days = summary['sales_days']
     cl_sales_days = summary['cl_sales_days']
@@ -41,7 +44,8 @@ def generate_html_report(results, output_path):
     for store in sorted(retail_stores):
         sf = df_frames[df_frames['store_name'] == store]
         sf_sorted = sf.sort_values('national_rank', ascending=True)
-        row = {'store': store}
+        store_no = store_number_map.get(store, '')
+        row = {'store': store, 'store_no': store_no}
         for top_n in [50, 100, 200, 300]:
             tier = sf_sorted.head(top_n)
             n = len(tier)
@@ -53,11 +57,11 @@ def generate_html_report(results, output_path):
         store_shortage.append(row)
     store_shortage.sort(key=lambda x: x.get('top50', 0) or 0, reverse=True)
 
-    # National shortage
-    nat_sorted = df_frames.sort_values('national_rank', ascending=True)
+    # National shortage — use national_rank <= N (not .head()) because
+    # each SKU has rows across all stores; .head(50) would only get ~1 SKU
     nat_shortage = {'store': '全國'}
     for top_n in [50, 100, 200, 300]:
-        tier = nat_sorted.head(top_n)
+        tier = df_frames[df_frames['national_rank'] <= top_n]
         n = len(tier)
         short = int(tier['is_stockout'].sum()) + int(tier['is_low_stock'].sum())
         nat_shortage[f'top{top_n}'] = round(short / n * 100, 1) if n > 0 else None
@@ -245,7 +249,7 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
 
 <header>
   <h1>OWNDAYS Taiwan ─ Store Health Dashboard</h1>
-  <div class="meta">更新時間: {now} ｜ 鏡框銷售期間: {sales_days}天 ｜ CL銷售期間: {cl_sales_days}天 ｜ 門市數: {n_stores}</div>
+  <div class="meta">更新時間: {now} ｜ 鏡框銷售期間: {sales_days}天 ｜ 隱形眼鏡銷售期間: {cl_sales_days}天 ｜ 門市數: {n_stores}</div>
 </header>
 
 <div class="kpi-row">
@@ -254,9 +258,28 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
   <div class="kpi"><div class="value">{summary['frame_stockout_pct']:.1f}%</div><div class="label">鏡框缺貨率 (qty≤1)</div></div>
   <div class="kpi"><div class="value">{summary['frame_low_stock_pct']:.1f}%</div><div class="label">庫存緊張率 (DOH&lt;1.5月)</div></div>
   <div class="kpi"><div class="value">{int(summary['dead_stock_count'])}</div><div class="label">無用庫存筆數</div></div>
-  <div class="kpi"><div class="value">{summary['total_cl_skus']}</div><div class="label">CL SKU 數</div></div>
+  <div class="kpi"><div class="value">{summary['total_cl_skus']}</div><div class="label">隱形眼鏡 SKU 數</div></div>
 </div>
+"""
 
+    # AI Insight + Alert section (only if available)
+    if ai_alerts:
+        alert_html = ''.join(f'<div class="alert-item" style="padding:4px 0;">{a["message"]}</div>' for a in ai_alerts)
+        html += f"""
+<div style="background:#FFF3E0;border-left:4px solid #E65100;padding:12px 16px;margin:12px 0;border-radius:4px;">
+  <div style="font-weight:bold;color:#E65100;margin-bottom:6px;">⚠️ 異常警報</div>
+  {alert_html}
+</div>"""
+
+    if ai_insight:
+        escaped = ai_insight.replace('`', '\\`').replace('<', '&lt;').replace('>', '&gt;')
+        html += f"""
+<div style="background:#E8F5E9;border-left:4px solid #2E7D32;padding:12px 16px;margin:12px 0;border-radius:4px;">
+  <div style="font-weight:bold;color:#2E7D32;margin-bottom:6px;">🤖 AI 每日洞察 (Claude Sonnet)</div>
+  <div style="color:#333;line-height:1.7;">{escaped}</div>
+</div>"""
+
+    html += """
 <div class="tab-bar">
   <button class="active" onclick="showTab('tab-shortage')">各門市庫存不足%</button>
   <button onclick="showTab('tab-brand')">Brand 可展示SKU</button>
@@ -273,9 +296,9 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
   </div>
   <div class="scroll-wrapper">
   <table id="shortage-table">
-  <thead><tr><th>No.</th><th>門市</th><th>Top 50</th><th>Top 100</th><th>Top 200</th><th>Top 300</th></tr></thead>
+  <thead><tr><th>No.</th><th>店號</th><th>門市</th><th>Top 50</th><th>Top 100</th><th>Top 200</th><th>Top 300</th></tr></thead>
   <tbody>
-  <tr class="nat-row"><td>—</td><td class="sticky-col">全國</td>"""
+  <tr class="nat-row"><td>—</td><td>—</td><td class="sticky-col">全國</td>"""
 
     for k in ['top50', 'top100', 'top200', 'top300']:
         v = nat_shortage[k]
@@ -284,7 +307,7 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
     html += '</tr>\n'
 
     for i, s in enumerate(store_shortage, 1):
-        html += f'<tr><td>{i}</td><td class="sticky-col">{s["store"]}</td>'
+        html += f'<tr><td>{i}</td><td>{s.get("store_no","")}</td><td class="sticky-col">{s["store"]}</td>'
         for k in ['top50', 'top100', 'top200', 'top300']:
             v = s[k]
             if v is not None:
@@ -305,14 +328,15 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
   </div>
   <div class="scroll-wrapper">
   <table id="brand-table">
-  <thead><tr><th>No.</th><th>門市</th><th class="green">Total</th>"""
+  <thead><tr><th>No.</th><th>店號</th><th>門市</th><th class="green">Total</th>"""
 
     for b in brand_list:
         html += f'<th class="green">{b}</th>'
     html += '</tr></thead>\n<tbody>\n'
 
     for i, row in enumerate(brand_matrix, 1):
-        html += f'<tr><td>{i}</td><td class="sticky-col">{row["store"]}</td>'
+        sno = store_number_map.get(row['store'], '')
+        html += f'<tr><td>{i}</td><td>{sno}</td><td class="sticky-col">{row["store"]}</td>'
         html += f'<td><b>{row.get("_total", 0)}</b></td>'
         for b in brand_list:
             v = row.get(b, 0)
@@ -322,7 +346,7 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
 
     # Total row
     grand_total = sum(row.get('_total', 0) for row in brand_matrix)
-    html += f'<tr class="nat-row"><td>—</td><td class="sticky-col">全國合計</td><td><b>{grand_total}</b></td>'
+    html += f'<tr class="nat-row"><td>—</td><td>—</td><td class="sticky-col">全國合計</td><td><b>{grand_total}</b></td>'
     for b in brand_list:
         total = sum(row.get(b, 0) for row in brand_matrix)
         html += f'<td>{total}</td>'
@@ -371,7 +395,8 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
     # Store options sorted by Top50 shortage (worst first)
     for s in store_shortage:
         pct_label = f" ({s['top50']:.0f}%)" if s.get('top50') is not None else ''
-        html += f'\n      <option value="{s["store"]}">{s["store"]}{pct_label}</option>'
+        sno = f"[{s.get('store_no','')}] " if s.get('store_no') else ''
+        html += f'\n      <option value="{s["store"]}">{sno}{s["store"]}{pct_label}</option>'
 
     html += """
     </select>
