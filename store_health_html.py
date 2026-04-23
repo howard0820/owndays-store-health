@@ -184,6 +184,30 @@ def generate_html_report(results, output_path):
 
         store_data[store] = {'tiers': tiers, 'frames': frames, 'cls': cls_list, 'brands': brands}
 
+    # 5. Dead stock data
+    dead_stock_data = []
+    if 'is_dead_stock' in df_frames.columns:
+        dead_all = df_frames[df_frames['is_dead_stock'] == True].copy()
+        if not dead_all.empty:
+            dead_agg = dead_all.groupby('PLU', as_index=False).agg(
+                品番=('品番', 'first'),
+                ブランド=('ブランド', 'first') if 'ブランド' in dead_all.columns else ('品番', 'first'),
+                total_inv=('inventory', 'sum'),
+                total_sales=('sales', 'sum'),
+                n_stores=('store_name', 'nunique'),
+                reason=('dead_reason', 'first'),
+            ).sort_values('total_inv', ascending=False).head(200)
+
+            for _, r in dead_agg.iterrows():
+                dead_stock_data.append({
+                    'hinban': r['品番'],
+                    'brand': r.get('ブランド', ''),
+                    'inv': int(r['total_inv']),
+                    'sales': int(r['total_sales']),
+                    'stores': int(r['n_stores']),
+                    'reason': r.get('reason', ''),
+                })
+
     # ── Build HTML ─────────────────────────────────────────────────────
     html = f"""<!DOCTYPE html>
 <html lang="zh-TW">
@@ -285,6 +309,7 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
   <button onclick="showTab('tab-brand')">Brand 可展示SKU</button>
   <button onclick="showTab('tab-national')">全國 Top SKU</button>
   <button onclick="showTab('tab-stores')" style="background:#FF6D01;color:#fff;border-color:#FF6D01">📦 各門市明細</button>
+  <button onclick="showTab('tab-dead')" style="background:#434343;color:#fff;border-color:#434343">⚫ 無用庫存</button>
 </div>
 
 <!-- Tab 1: Shortage -->
@@ -404,6 +429,27 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
   <div id="store-detail-area" style="margin-top:16px;"></div>
 </div>
 </div>
+
+<!-- Tab 5: Dead Stock -->
+<div id="tab-dead" class="tab-content">
+<div class="section">
+  <h2 style="color:#434343;border-color:#434343">⚫ 無用庫存 (Dead Stock)</h2>
+  <p style="color:#888;font-size:0.9em;">庫存量遠高於銷售速度的 SKU，建議調撥或促銷消化</p>
+  <div class="scroll-wrapper">
+  <table id="dead-table">
+  <thead><tr><th>品番</th><th>品牌</th><th>全台庫存</th><th>全台銷量</th><th>涉及門市數</th><th>原因</th></tr></thead>
+  <tbody>"""
+
+    if dead_stock_data:
+        for d in dead_stock_data:
+            html += f"""<tr>
+  <td style="text-align:left">{d['hinban']}</td><td>{d['brand']}</td>
+  <td>{d['inv']}</td><td>{d['sales']}</td><td>{d['stores']}</td>
+  <td style="text-align:left;font-size:0.85em">{d['reason']}</td></tr>\n"""
+    else:
+        html += '<tr><td colspan="6" style="color:#888;font-style:italic;">無明顯無用庫存</td></tr>\n'
+
+    html += """</tbody></table></div></div></div>
 
 </div><!-- container -->
 
