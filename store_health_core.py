@@ -207,9 +207,10 @@ def fetch_live_store_list(timeout=15):
         return None
 
 
-def filter_by_live_list(retail_stores, live_stores_dict):
+def filter_by_live_list(retail_stores, live_stores_dict, sales_data=None):
     """Filter retail stores to only those in the live list (dict: store_name -> store_number).
-    Uses stricter fuzzy matching: substring match only if shorter string is >= 45% of longer string length.
+    Uses fuzzy matching. If a store has sales > 0 but isn't matched, keep it anyway
+    (likely a name mismatch, not a closed store).
     Returns (matched_stores_list, store_number_map).
     """
     if not live_stores_dict:
@@ -226,14 +227,10 @@ def filter_by_live_list(retail_stores, live_stores_dict):
             store_number_map[store] = live_stores_dict[store]
             continue
 
-        # Stricter fuzzy matching
+        # Fuzzy matching: substring with length ratio >= 45%
         found = False
         for ls, store_num in live_stores_dict.items():
-            # Check if one is substring of the other
             if ls in store or store in ls:
-                # Stricter: shorter must be >= 45% of longer
-                # Blocks "淡水"(2) vs "淡水大都會廣場"(6) = 33% < 45%
-                # Allows "巨城"(2) vs "新竹巨城"(4) = 50% >= 45%
                 shorter = min(len(ls), len(store))
                 longer = max(len(ls), len(store))
                 if shorter >= longer * 0.45:
@@ -243,13 +240,23 @@ def filter_by_live_list(retail_stores, live_stores_dict):
                     break
 
         if not found:
-            removed.append(store)
+            # Fallback: if store has sales, keep it (name mismatch, not closed)
+            has_sales = False
+            if sales_data is not None:
+                has_sales = sales_data.get(store, 0) > 0
+            if has_sales:
+                matched.append(store)
+                store_number_map[store] = ''
+                print(f"    -> KEPT (has sales but not in live list): {store}")
+            else:
+                removed.append(store)
 
     if removed:
         print(f"    -> Excluded {len(removed)} closed/unlisted stores:")
         for s in sorted(removed):
             print(f"       - {s}")
 
+    print(f"    -> Active stores: {len(matched)} (matched={len(matched)-len([s for s in matched if store_number_map.get(s)==''])}, kept-by-sales={len([s for s in matched if store_number_map.get(s)==''])})")
     return matched, store_number_map
 
 
@@ -704,9 +711,11 @@ def run_analysis(frame_file, cl_file, sales_days, cl_sales_days=60,
     print(f"\n    Fetching live store list from Google Sheets...")
     live_stores_dict = fetch_live_store_list()
     store_number_map = {}
+    # Build per-store sales for fallback logic
+    store_sales_totals = df_all.groupby('store_name')['sales'].sum().to_dict()
     if live_stores_dict:
-        retail_stores, store_number_map = filter_by_live_list(retail_stores, live_stores_dict)
-        print(f"    -> Active stores: {len(retail_stores)}, Excluded: {len(live_stores_dict) - len(retail_stores)}")
+        retail_stores, store_number_map = filter_by_live_list(
+            retail_stores, live_stores_dict, sales_data=store_sales_totals)
 
     if store_filter:
         retail_stores = [s for s in retail_stores

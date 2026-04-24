@@ -89,13 +89,13 @@ def generate_html_report(results, output_path):
     # 3. National top SKU list (top 300)
     nat_frames = df_frames.groupby('PLU', as_index=False).agg(
         品番=('品番', 'first'),
+        カラー2=('カラー2', 'first') if 'カラー2' in df_frames.columns else ('品番', 'first'),
         ブランド=('ブランド', 'first') if 'ブランド' in df_frames.columns else ('品番', 'first'),
         sales=('sales', 'sum'),
         inventory=('inventory', 'sum'),
         national_rank=('national_rank', 'first'),
         oos_stores=('is_stockout', 'sum'),
         low_stores=('is_low_stock', 'sum'),
-        n_stores=('store_name', 'nunique'),
     ).sort_values('national_rank').head(300)
     nat_frames['doh_m'] = np.where(
         nat_frames['sales'] > 0,
@@ -106,13 +106,13 @@ def generate_html_report(results, output_path):
         nat_sku_data.append({
             'rank': int(r['national_rank']),
             'hinban': r['品番'],
+            'color': str(r.get('カラー2', '')),
             'brand': r.get('ブランド', ''),
             'sales': int(r['sales']),
             'inv': int(r['inventory']),
             'doh': round(r['doh_m'], 1) if r['doh_m'] < 999 else '∞',
             'oos': int(r['oos_stores']),
             'low': int(r['low_stores']),
-            'stores': int(r['n_stores']),
         })
 
     # 4. Per-store data
@@ -146,8 +146,8 @@ def generate_html_report(results, output_path):
             else:
                 status = '貨量OK'
             frames.append({
-                'hinban': r['品番'], 'plu': r['PLU'],
-                'brand': r.get('ブランド', ''),
+                'hinban': r['品番'], 'color': str(r.get('カラー2', '')),
+                'plu': r['PLU'], 'brand': r.get('ブランド', ''),
                 'sales': int(r['sales']), 'inv': int(r['inventory']),
                 'doh': doh, 'nat_rank': int(r['national_rank']),
                 'store_rank': int(r['store_rank']), 'status': status,
@@ -279,9 +279,9 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
 <div class="kpi-row">
   <div class="kpi"><div class="value">{n_stores}</div><div class="label">分析門市數</div></div>
   <div class="kpi"><div class="value">{summary['total_frame_skus']}</div><div class="label">鏡框 SKU 數</div></div>
-  <div class="kpi"><div class="value">{summary['frame_stockout_pct']:.1f}%</div><div class="label">鏡框缺貨率 (qty≤1)</div></div>
-  <div class="kpi"><div class="value">{summary['frame_low_stock_pct']:.1f}%</div><div class="label">庫存緊張率 (DOH&lt;1.5月)</div></div>
-  <div class="kpi"><div class="value">{int(summary['dead_stock_count'])}</div><div class="label">無用庫存筆數</div></div>
+  <div class="kpi"><div class="value">{summary['frame_stockout_pct']:.1f}%</div><div class="label">全國缺貨率<br><span style="font-size:0.75em;color:#999">全門市×全SKU中 qty≤1 占比</span></div></div>
+  <div class="kpi"><div class="value">{summary['frame_low_stock_pct']:.1f}%</div><div class="label">全國緊張率<br><span style="font-size:0.75em;color:#999">DOH&lt;1.5月 占比</span></div></div>
+  <div class="kpi"><div class="value">{int(summary['dead_stock_count'])}</div><div class="label">無用庫存<br><span style="font-size:0.75em;color:#999">全國 門市×SKU 筆數</span></div></div>
   <div class="kpi"><div class="value">{summary['total_cl_skus']}</div><div class="label">隱形眼鏡 SKU 數</div></div>
 </div>
 """
@@ -394,8 +394,8 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
   <div class="scroll-wrapper" style="max-height:700px;">
   <table id="national-table">
   <thead><tr>
-    <th>排名</th><th>品番</th><th>品牌</th><th>全台銷量<br>(""" + sales_date_label + """)</th><th>全台庫存<br>(""" + inv_date_label + """)</th>
-    <th>DOH(月)</th><th>缺貨店數</th><th>緊張店數</th><th>鋪貨店數</th>
+    <th>排名</th><th>品番</th><th>Color</th><th>品牌</th><th>全台銷量<br>(""" + sales_date_label + """)</th><th>全台庫存<br>(""" + inv_date_label + """)</th>
+    <th>DOH(月)</th><th>缺貨店數</th><th>緊張店數</th>
   </tr></thead>
   <tbody>"""
 
@@ -403,9 +403,9 @@ tr:hover .sticky-col {{ background: #f0f7ff; }}
         oos_cls = ' class="pct-high"' if sku['oos'] > n_stores * 0.3 else (' class="pct-mid"' if sku['oos'] > 0 else '')
         html += f"""<tr data-oos="{sku['oos']}" data-low="{sku['low']}">
   <td>{sku['rank']}</td><td style="text-align:left">{sku['hinban']}</td>
-  <td>{sku['brand']}</td><td>{sku['sales']}</td><td>{sku['inv']}</td>
+  <td>{sku['color']}</td><td>{sku['brand']}</td><td>{sku['sales']}</td><td>{sku['inv']}</td>
   <td>{sku['doh']}</td><td{oos_cls}>{sku['oos']}</td>
-  <td>{sku['low']}</td><td>{sku['stores']}</td></tr>\n"""
+  <td>{sku['low']}</td></tr>\n"""
 
     html += """</tbody></table></div></div></div>
 
@@ -520,12 +520,12 @@ function showStore(name) {
   h += '<h3 style="color:#1a73e8;margin-bottom:8px;">📦 鏡框 / 太陽眼鏡 SKU清單</h3>';
   h += '<div class="filter-bar"><input type="text" placeholder="搜尋品番/品牌..." oninput="filterStoreTable(this.value)"></div>';
   h += '<div class="scroll-wrapper" style="max-height:500px"><table id="store-frame-table"><thead><tr>';
-  h += '<th>品番</th><th>PLU</th><th>品牌</th><th>銷量</th><th>在庫</th><th>DOH(月)</th><th>全台排名</th><th>店內排名</th><th>狀態</th><th>建議補貨</th>';
+  h += '<th>品番</th><th>Color</th><th>PLU</th><th>品牌</th><th>銷量</th><th>在庫</th><th>DOH(月)</th><th>全台排名</th><th>店內排名</th><th>狀態</th><th>建議補貨</th>';
   h += '</tr></thead><tbody>';
   d.frames.forEach(f => {
     const sc = statusClass(f.status);
     const fill = f.status === '缺貨' ? 'style="background:#fce8e6"' : (f.status === '庫存緊張' ? 'style="background:#fef7e0"' : '');
-    h += '<tr ' + fill + '><td style="text-align:left">' + f.hinban + '</td><td>' + f.plu + '</td><td>' + f.brand + '</td>';
+    h += '<tr ' + fill + '><td style="text-align:left">' + f.hinban + '</td><td>' + (f.color||'') + '</td><td>' + f.plu + '</td><td>' + f.brand + '</td>';
     h += '<td>' + f.sales + '</td><td>' + f.inv + '</td><td>' + f.doh + '</td>';
     h += '<td>' + f.nat_rank + '</td><td>' + f.store_rank + '</td>';
     h += '<td class="' + sc + '">' + f.status + '</td>';

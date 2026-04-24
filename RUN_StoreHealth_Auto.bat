@@ -42,7 +42,7 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-REM ── Auto push to GitHub Pages ──
+REM ---- Auto push to GitHub Pages ----
 if exist "docs\index.html" (
     echo.
     echo ============================================
@@ -69,7 +69,7 @@ if exist "docs\index.html" (
     )
 ) else (
     echo.
-    echo [SKIP] docs/index.html not found, skipping push
+    echo [SKIP] docs\index.html not found, skipping push
 )
 
 echo.
