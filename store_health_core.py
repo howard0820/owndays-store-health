@@ -240,6 +240,20 @@ def filter_by_live_list(retail_stores, live_stores_dict, sales_data=None):
                     break
 
         if not found:
+            # Second-pass: more aggressive matching — substring match without length ratio,
+            # or match after stripping common prefixes (OWNDAYS, OWNDAYS )
+            for ls, store_num in live_stores_dict.items():
+                # Try matching core name (strip OWNDAYS prefix from both sides)
+                store_clean = re.sub(r'^OWNDAYS\s*', '', store)
+                ls_clean = re.sub(r'^OWNDAYS\s*', '', ls)
+                if store_clean and ls_clean and (ls_clean in store_clean or store_clean in ls_clean):
+                    matched.append(store)
+                    store_number_map[store] = store_num
+                    found = True
+                    print(f"    -> MATCHED (aggressive): {store} ↔ {ls} → {store_num}")
+                    break
+
+        if not found:
             # Fallback: if store has sales, keep it (name mismatch, not closed)
             has_sales = False
             if sales_data is not None:
@@ -247,7 +261,7 @@ def filter_by_live_list(retail_stores, live_stores_dict, sales_data=None):
             if has_sales:
                 matched.append(store)
                 store_number_map[store] = ''
-                print(f"    -> KEPT (has sales but not in live list): {store}")
+                print(f"    -> KEPT (has sales but not in live list, no store number): {store}")
             else:
                 removed.append(store)
 

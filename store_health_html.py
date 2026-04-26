@@ -9,6 +9,25 @@ import numpy as np
 from datetime import datetime, timedelta
 
 
+def _clean_color(val):
+    """Convert color value to clean string: 1.0 → '1', nan → '', 'C4' → 'C4'."""
+    if val is None:
+        return ''
+    s = str(val).strip()
+    if s in ('', 'nan', 'None', 'NaN'):
+        return ''
+    # If it looks like a float (e.g. "1.0", "4.0"), convert to int string
+    try:
+        f = float(s)
+        if f != f:  # NaN check
+            return ''
+        if f == int(f):
+            return str(int(f))
+        return s
+    except ValueError:
+        return s
+
+
 def generate_html_report(results, output_path):
     """Generate a self-contained HTML dashboard from analysis results."""
     print(f"\n[HTML] Generating HTML report...")
@@ -89,7 +108,7 @@ def generate_html_report(results, output_path):
     # 3. National top SKU list (top 300)
     nat_frames = df_frames.groupby('PLU', as_index=False).agg(
         品番=('品番', 'first'),
-        カラー2=('カラー2', 'first') if 'カラー2' in df_frames.columns else ('品番', 'first'),
+        カラー=('カラー', 'first') if 'カラー' in df_frames.columns else ('品番', 'first'),
         ブランド=('ブランド', 'first') if 'ブランド' in df_frames.columns else ('品番', 'first'),
         sales=('sales', 'sum'),
         inventory=('inventory', 'sum'),
@@ -106,7 +125,7 @@ def generate_html_report(results, output_path):
         nat_sku_data.append({
             'rank': int(r['national_rank']),
             'hinban': r['品番'],
-            'color': str(r.get('カラー2', '')),
+            'color': _clean_color(r.get('カラー', '')),
             'brand': r.get('ブランド', ''),
             'sales': int(r['sales']),
             'inv': int(r['inventory']),
@@ -146,7 +165,7 @@ def generate_html_report(results, output_path):
             else:
                 status = '貨量OK'
             frames.append({
-                'hinban': r['品番'], 'color': str(r.get('カラー2', '')),
+                'hinban': r['品番'], 'color': _clean_color(r.get('カラー', '')),
                 'plu': r['PLU'], 'brand': r.get('ブランド', ''),
                 'sales': int(r['sales']), 'inv': int(r['inventory']),
                 'doh': doh, 'nat_rank': int(r['national_rank']),
