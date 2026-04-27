@@ -159,7 +159,8 @@ STORE_LIST_URL = (
 def fetch_live_store_list(timeout=15):
     """Fetch active store list from Google Sheets.
     Returns dict mapping store_name -> store_number, or None if fetch fails.
-    Sheet columns: A=店鋪No., B=店名, C=分區
+    Sheet columns: A=店鋪No., B=店名, C=分區, D=Status
+    Only includes stores where Column D = 'Live'.
     """
     try:
         req = urllib_request.Request(STORE_LIST_URL, headers={'User-Agent': 'Mozilla/5.0'})
@@ -167,24 +168,29 @@ def fetch_live_store_list(timeout=15):
         csv_data = resp.read().decode('utf-8')
         df = pd.read_csv(io.StringIO(csv_data), header=1)  # header at row 2 (0-indexed row 1)
 
-        # Find the store number and name columns
+        # Find columns by name
         num_col = None
         name_col = None
+        status_col = None
         for c in df.columns:
             col_str = str(c).strip()
             if '店鋪No' in col_str or '店鋪号' in col_str or '店號' in col_str:
                 num_col = c
             if '店名' in col_str:
                 name_col = c
+            if col_str.lower() in ('status', 'live', '狀態'):
+                status_col = c
 
         if name_col is None:
-            # Fallback: second column
             name_col = df.columns[1] if len(df.columns) > 1 else df.columns[0]
         if num_col is None:
-            # Fallback: first column
             num_col = df.columns[0]
+        # Column D fallback (0-indexed column 3)
+        if status_col is None and len(df.columns) > 3:
+            status_col = df.columns[3]
 
         stores = {}
+        skipped_not_live = 0
         for idx, row in df.iterrows():
             name_val = row[name_col] if name_col in row.index else None
             num_val = row[num_col] if num_col in row.index else None
@@ -192,14 +198,22 @@ def fetch_live_store_list(timeout=15):
             if pd.isna(name_val):
                 continue
             s = str(name_val).strip()
-            if s and s != 'nan':
-                # Get store number if available
-                store_num = ''
-                if num_val and not pd.isna(num_val):
-                    store_num = str(num_val).strip()
-                stores[s] = store_num
+            if not s or s == 'nan':
+                continue
 
-        print(f"    -> Live store list: {len(stores)} active stores")
+            # Check status column — only include "Live" stores
+            if status_col is not None and status_col in row.index:
+                status_val = str(row[status_col]).strip().lower()
+                if status_val not in ('live', ''):
+                    skipped_not_live += 1
+                    continue
+
+            store_num = ''
+            if num_val and not pd.isna(num_val):
+                store_num = str(num_val).strip()
+            stores[s] = store_num
+
+        print(f"    -> Live store list: {len(stores)} active stores (skipped {skipped_not_live} non-Live)")
         return stores
     except (URLError, Exception) as e:
         print(f"    -> WARN: Could not fetch live store list ({e})")
