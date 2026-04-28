@@ -60,7 +60,7 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo [1/3] Staging files...
 git add docs/index.html
-git add store_health_core.py store_health_auto.py store_health_interactive.py store_health_html.py
+git add *.py
 git add .gitignore
 git add *.bat
 

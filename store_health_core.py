@@ -156,11 +156,54 @@ STORE_LIST_URL = (
     "/export?format=csv&gid=173795654"
 )
 
+# ── Hardcoded alias: 在庫表 store name → (Google Sheet name, store number) ──
+# This is the DEFINITIVE mapping for all known mismatches between the 在庫表
+# names and Google Sheet names. Checked first before any fuzzy matching.
+# Last updated: 2026-04-29
+STORE_ALIAS = {
+    # --- Spacing / casing differences ---
+    'JC PARK新莊':               ('JC PARK 新莊',         '995'),
+    'LaLaport南港':              ('Lalaport南港',          '1051'),
+    'LaLaport台中':              ('Lalaport台中',          '1029'),
+    '微風 台北車站':               ('微風台北車站',           '917'),
+    # --- Substring / abbreviation differences ---
+    '京站小碧潭':                 ('京站',                  '923'),
+    '台北永康':                   ('永康',                  '1036'),
+    '新光影城桃園高鐵':            ('桃園高鐵',              '1002'),
+    '新光三越信義A11':             ('新光三越A11',            '964'),
+    # --- Name order / format differences ---
+    '新光三越台南小西門':           ('台南三越小西門',          '939'),
+    '秀泰嘉義':                   ('嘉義秀泰',              '988'),
+    '新光三越嘉義':               ('嘉義新光',              '1060'),
+    # --- MITSUI / 三井 branding differences ---
+    'MITSUI OUTLET PARK 台南':   ('三井OUTLET台南',         '1015'),
+    'Mitsui outlet park 林口':   ('三井林口 OUTLET',         '935'),
+    # --- 大潤發 → 大全聯 rebrand (same store, new tenant name) ---
+    '內湖大全聯':                 ('內湖大潤發',             '1022'),
+    '員林大全聯':                 ('員林大潤發',             '1008'),
+    '頭份大全聯':                 ('頭份大潤發',             '1040'),
+    # --- Micro-style differences ---
+    '台北微風廣場':               ('微風台北車站',            '917'),
+    # --- 淡水大都會廣場 (#959) vs 淡水 (#1059) — two different stores ---
+    '淡水大都會廣場':              ('淡水大都會',             '959'),
+    '淡水大都會':                 ('淡水大都會',             '959'),
+}
+# Note: '大巨蛋SOGO' is a new store not yet in the Google Sheet.
+# Howard should add it manually; until then it will be kept-by-sales if active.
+
+# Minimum total sales (frame units, summed over the analysis period) for the
+# "kept-by-sales" fallback. Active stores typically do hundreds to thousands
+# per 30 days; closed stores leak in via stragglers (returns, transfer-in
+# corrections) usually well under 30. Override via env var if needed.
+MIN_SALES_FOR_FALLBACK = int(os.environ.get('MIN_SALES_FOR_FALLBACK', '30'))
+
 def fetch_live_store_list(timeout=15):
     """Fetch active store list from Google Sheets.
-    Returns dict mapping store_name -> store_number, or None if fetch fails.
+    Returns (live_dict, not_live_set):
+      - live_dict: store_name -> store_number for Live stores
+      - not_live_set: set of store names explicitly marked Not Live
+    Returns (None, set()) if fetch fails.
     Sheet columns: A=店鋪No., B=店名, C=分區, D=Status
-    Only includes stores where Column D = 'Live'.
     """
     try:
         req = urllib_request.Request(STORE_LIST_URL, headers={'User-Agent': 'Mozilla/5.0'})
@@ -190,6 +233,7 @@ def fetch_live_store_list(timeout=15):
             status_col = df.columns[3]
 
         stores = {}
+        not_live = set()
         skipped_not_live = 0
         for idx, row in df.iterrows():
             name_val = row[name_col] if name_col in row.index else None
@@ -206,6 +250,7 @@ def fetch_live_store_list(timeout=15):
                 status_val = str(row[status_col]).strip().lower()
                 if status_val not in ('live', ''):
                     skipped_not_live += 1
+                    not_live.add(s)
                     continue
 
             store_num = ''
@@ -213,35 +258,46 @@ def fetch_live_store_list(timeout=15):
                 store_num = str(num_val).strip()
             stores[s] = store_num
 
-        print(f"    -> Live store list: {len(stores)} active stores (skipped {skipped_not_live} non-Live)")
-        return stores
+        print(f"    -> Live store list: {len(stores)} active stores (skipped {skipped_not_live} non-Live: {not_live})")
+        return stores, not_live
     except (URLError, Exception) as e:
         print(f"    -> WARN: Could not fetch live store list ({e})")
         print(f"    -> Continuing with all stores from data")
-        return None
+        return None, set()
 
 
-def filter_by_live_list(retail_stores, live_stores_dict, sales_data=None):
+def filter_by_live_list(retail_stores, live_stores_dict, sales_data=None, not_live_names=None):
     """Filter retail stores to only those in the live list (dict: store_name -> store_number).
-    Uses fuzzy matching. If a store has sales > 0 but isn't matched, keep it anyway
-    (likely a name mismatch, not a closed store).
+    Uses fuzzy matching. Stores explicitly marked Not Live are always excluded.
     Returns (matched_stores_list, store_number_map).
     """
     if not live_stores_dict:
         return retail_stores, {}
 
+    if not_live_names is None:
+        not_live_names = set()
+
     matched = []
     removed = []
     store_number_map = {}
 
+    alias_hits = 0
     for store in retail_stores:
-        # Exact match
+        # 0) Hardcoded alias lookup (highest priority, guaranteed correct)
+        if store in STORE_ALIAS:
+            _gs_name, _gs_num = STORE_ALIAS[store]
+            matched.append(store)
+            store_number_map[store] = _gs_num
+            alias_hits += 1
+            continue
+
+        # 1) Exact match against Google Sheet names
         if store in live_stores_dict:
             matched.append(store)
             store_number_map[store] = live_stores_dict[store]
             continue
 
-        # Fuzzy matching: substring with length ratio >= 45%
+        # 2) Fuzzy matching: substring with length ratio >= 45%
         found = False
         for ls, store_num in live_stores_dict.items():
             if ls in store or store in ls:
@@ -268,23 +324,39 @@ def filter_by_live_list(retail_stores, live_stores_dict, sales_data=None):
                     break
 
         if not found:
-            # Fallback: if store has sales, keep it (name mismatch, not closed)
-            has_sales = False
-            if sales_data is not None:
-                has_sales = sales_data.get(store, 0) > 0
-            if has_sales:
+            # Check if explicitly Not Live — NEVER keep these regardless of sales
+            is_not_live = store in not_live_names
+            if not is_not_live:
+                # Also check fuzzy match against not_live_names
+                for nl in not_live_names:
+                    if nl in store or store in nl:
+                        is_not_live = True
+                        break
+            if is_not_live:
+                store_sales = sales_data.get(store, 0) if sales_data is not None else 0
+                removed.append((store, store_sales))
+                print(f"    -> EXCLUDED (Not Live): {store}")
+                continue
+
+            # Fallback: keep only if sales >= threshold (filters out stragglers
+            # from closed stores while preserving active stores whose names
+            # don't quite match the Live list).
+            store_sales = sales_data.get(store, 0) if sales_data is not None else 0
+            if store_sales >= MIN_SALES_FOR_FALLBACK:
                 matched.append(store)
                 store_number_map[store] = ''
-                print(f"    -> KEPT (has sales but not in live list, no store number): {store}")
+                print(f"    -> KEPT (sales={store_sales:.0f} >= {MIN_SALES_FOR_FALLBACK}, but not in live list): {store}")
             else:
-                removed.append(store)
+                removed.append((store, store_sales))
 
     if removed:
-        print(f"    -> Excluded {len(removed)} closed/unlisted stores:")
-        for s in sorted(removed):
-            print(f"       - {s}")
+        print(f"    -> Excluded {len(removed)} closed/unlisted stores (sales < {MIN_SALES_FOR_FALLBACK}):")
+        for s, sales in sorted(removed, key=lambda x: -x[1]):
+            print(f"       - {s} (sales={sales:.0f})")
 
-    print(f"    -> Active stores: {len(matched)} (matched={len(matched)-len([s for s in matched if store_number_map.get(s)==''])}, kept-by-sales={len([s for s in matched if store_number_map.get(s)==''])})")
+    kept_by_sales = len([s for s in matched if store_number_map.get(s)==''])
+    matched_with_num = len(matched) - kept_by_sales
+    print(f"    -> Active stores: {len(matched)} (alias={alias_hits}, matched={matched_with_num}, kept-by-sales={kept_by_sales})")
     return matched, store_number_map
 
 
@@ -737,13 +809,14 @@ def run_analysis(frame_file, cl_file, sales_days, cl_sales_days=60,
 
     # Cross-check with live store list from Google Sheets
     print(f"\n    Fetching live store list from Google Sheets...")
-    live_stores_dict = fetch_live_store_list()
+    live_stores_dict, not_live_names = fetch_live_store_list()
     store_number_map = {}
     # Build per-store sales for fallback logic
     store_sales_totals = df_all.groupby('store_name')['sales'].sum().to_dict()
     if live_stores_dict:
         retail_stores, store_number_map = filter_by_live_list(
-            retail_stores, live_stores_dict, sales_data=store_sales_totals)
+            retail_stores, live_stores_dict, sales_data=store_sales_totals,
+            not_live_names=not_live_names)
 
     if store_filter:
         retail_stores = [s for s in retail_stores

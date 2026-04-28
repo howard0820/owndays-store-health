@@ -43,39 +43,48 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 REM ---- Auto push to GitHub Pages ----
+REM IMPORTANT: only the published output (docs/index.html) is auto-committed.
+REM Source code (.py / .bat) must be committed manually — past incident 2026-04-27:
+REM auto-staging .py files pushed an empty store_health_auto.py to origin/main.
 if exist "docs\index.html" (
     echo.
     echo ============================================
     echo   Pushing to GitHub Pages...
     echo ============================================
 
+    REM Sanity check — refuse to push if the dashboard is suspiciously small.
+    for %%A in ("docs\index.html") do set "INDEX_SIZE=%%~zA"
+    if %INDEX_SIZE% LSS 100000 (
+        echo   [ABORT] docs\index.html is only %INDEX_SIZE% bytes ^(min 100000^).
+        echo   Refusing to push a broken dashboard.
+        goto :skip_push
+    )
+
     git add docs/index.html >nul 2>&1
-    git add store_health_core.py store_health_auto.py store_health_html.py store_health_insight.py >nul 2>&1
-    git add .gitignore *.bat >nul 2>&1
 
     for /f "tokens=1-3 delims=/ " %%a in ('date /t') do set TODAY=%%a/%%b/%%c
     for /f "tokens=1-2 delims=: " %%a in ('time /t') do set NOW=%%a:%%b
-    git commit -m "Update Store Health Dashboard - %TODAY% %NOW%" >nul 2>&1
+    git commit -m "Update Store Health Dashboard - %TODAY% %NOW%"
 
     if %ERRORLEVEL% EQU 0 (
-        git push -u origin main >nul 2>&1
+        echo   Pushing to origin/main...
+        git push -u origin main
         if %ERRORLEVEL% EQU 0 (
-            echo   [OK] Dashboard pushed to GitHub Pages
+            echo.
+            echo   Push successful! GitHub Pages will update in ~1 min.
+            echo   https://howard0820.github.io/owndays-store-health/
         ) else (
-            echo   [WARN] Push failed - check credentials
+            echo.
+            echo   [ERROR] Push failed. Check your git credentials.
         )
     ) else (
-        echo   [SKIP] No changes to commit
+        echo   No changes to commit ^(dashboard unchanged^).
     )
-) else (
-    echo.
-    echo [SKIP] docs\index.html not found, skipping push
 )
 
+:skip_push
 echo.
 echo ============================================
-echo   All done!
+echo   Done!
 echo ============================================
-echo.
-echo Press any key to close...
-pause >nul
+pause
